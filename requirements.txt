@@ -1,0 +1,4 @@
+genutility
+piexif
+pymediainfo
+requests

@@ -1,0 +1,165 @@
+{
+    "ColorSpace": {
+        "1": "sRGB",
+        "65535": "Uncalibrated"
+    },
+    "Contrast": {
+        "0": "Normal",
+        "1": "Soft",
+        "2": "Hard"
+    },
+    "CustomRendered": {
+        "0": "Normal process",
+        "1": "Custom process"
+    },
+    "ExposureMode": {
+        "0": "Auto exposure",
+        "1": "Manual exposure",
+        "2": "Auto bracket"
+    },
+    "ExposureProgram": {
+        "0": "Not defined",
+        "1": "Manual",
+        "2": "Normal program",
+        "3": "Aperture priority",
+        "4": "Shutter priority",
+        "5": "Creative program (biased toward depth of field)",
+        "6": "Action program (biased toward fast shutter speed)",
+        "7": "Portrait mode (for closeup photos with the background out of focus)",
+        "8": "Landscape mode (for landscape photos with the background in focus)"
+    },
+    "Flash": {
+        "0": "Flash did not fire",
+        "1": "Flash fired",
+        "13": "Flash fired, compulsory flash mode, return light not detected",
+        "15": "Flash fired, compulsory flash mode, return light detected",
+        "16": "Flash did not fire, compulsory flash mode",
+        "24": "Flash did not fire, auto mode",
+        "25": "Flash fired, auto mode",
+        "29": "Flash fired, auto mode, return light not detected",
+        "31": "Flash fired, auto mode, return light detected",
+        "32": "No flash function",
+        "5": "Strobe return light not detected",
+        "65": "Flash fired, red-eye reduction mode",
+        "69": "Flash fired, red-eye reduction mode, return light not detected",
+        "7": "Strobe return light detected",
+        "71": "Flash fired, red-eye reduction mode, return light detected",
+        "73": "Flash fired, compulsory flash mode, red-eye reduction mode",
+        "77": "Flash fired, compulsory flash mode, red-eye reduction mode, return light not detected",
+        "79": "Flash fired, compulsory flash mode, red-eye reduction mode, return light detected",
+        "89": "Flash fired, auto mode, red-eye reduction mode",
+        "9": "Flash fired, compulsory flash mode",
+        "93": "Flash fired, auto mode, return light not detected, red-eye reduction mode",
+        "95": "Flash fired, auto mode, return light detected, red-eye reduction mode"
+    },
+    "FocalPlaneResolutionUnit": {
+        "1": "No absolute unit of measurement",
+        "2": "Inch",
+        "3": "Centimeter"
+    },
+    "GainControl": {
+        "0": "None",
+        "1": "Low gain up",
+        "2": "High gain up",
+        "3": "Low gain down",
+        "4": "High gain down"
+    },
+    "LightSource": {
+        "0": "Unknown",
+        "1": "Daylight",
+        "10": "Cloudy weather",
+        "11": "Shade",
+        "12": "Daylight fluorescent (D 5700 - 7100K)",
+        "13": "Day white fluorescent (N 4600 - 5400K)",
+        "14": "Cool white fluorescent (W 3900 - 4500K)",
+        "15": "White fluorescent (WW 3200 - 3700K)",
+        "17": "Standard light A",
+        "18": "Standard light B",
+        "19": "Standard light C",
+        "2": "Fluorescent",
+        "20": "D55",
+        "21": "D65",
+        "22": "D75",
+        "23": "D50",
+        "24": "ISO studio tungsten",
+        "255": "Other light source",
+        "3": "Tungsten (incandescent light)",
+        "4": "Flash",
+        "9": "Fine weather"
+    },
+    "MeteringMode": {
+        "0": "unknown",
+        "1": "Average",
+        "2": "CenterWeightedAverage",
+        "255": "other",
+        "3": "Spot",
+        "4": "MultiSpot",
+        "5": "Pattern",
+        "6": "Partial"
+    },
+    "PhotometricInterpretation": {
+        "0": "White is zero",
+        "1": "Black is zero",
+        "10": "ITU L*a*b*",
+        "2": "RGB",
+        "3": "Palette color",
+        "4": "Transparency Mask",
+        "5": "Seperated",
+        "6": "YCbCr",
+        "8": "CIE L*a*b*",
+        "9": "ICC L*a*b*"
+    },
+    "PlanarConfiguration": {
+        "1": "Chunky format",
+        "2": "Planar format"
+    },
+    "ResolutionUnit": {
+        "2": "inches",
+        "3": "centimeters"
+    },
+    "Saturation": {
+        "0": "Normal",
+        "1": "Low saturation",
+        "2": "High saturation"
+    },
+    "SceneCaptureType": {
+        "0": "Standard",
+        "1": "Landscape",
+        "2": "Portrait",
+        "3": "Night scene"
+    },
+    "SensingMethod": {
+        "1": "Not defined",
+        "2": "One-chip color area sensor",
+        "3": "Two-chip color area sensor",
+        "4": "Three-chip color area sensor",
+        "5": "Color sequential area sensor",
+        "7": "Trilinear sensor",
+        "8": "Color sequential linear sensor"
+    },
+    "SensitivityType": {
+        "0": "Unknown",
+        "1": "Standard Output Sensitivity",
+        "2": "Recommended Exposure Index",
+        "3": "ISO Speed",
+        "4": "Standard Output Sensitivity and Recommended Exposure Index",
+        "5": "Standard Output Sensitivity and ISO Speed",
+        "6": "Recommended Exposure Index and ISO Speed",
+        "7": "Standard Output Sensitivity, Recommended Exposure Index and ISO Speed"
+    },
+    "Sharpness": {
+        "0": "Normal",
+        "1": "Soft",
+        "2": "Hard"
+    },
+    "SubjectDistanceRange": {
+        "0": "unknown",
+        "1": "Macro",
+        "2": "Close view",
+        "3": "Distant view"
+    },
+    "WhiteBalance": {
+        "0": "Auto white balance",
+        "1": "Manual white balance"
+    }
+}
