@@ -1,9 +1,9 @@
 import logging
+from fractions import Fraction
 from typing import Any, Iterator, Tuple
 
 import piexif
 import pkg_resources
-from fraction import Fraction
 from genutility.json import read_json
 from piexif._exceptions import InvalidImageDataError  # noqa: F401
 
