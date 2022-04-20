@@ -14,8 +14,9 @@ from genutility.filesystem import FileProperties, scandir_rec
 from .utils import OpenFileOrUrl
 
 
-def iter_dir(path, extra=True, hashfunc=None, dirs=True):
-    # type: (str, bool, Optional[str], bool) -> Iterator[FileProperties]
+def iter_dir(
+    path: str, extra: bool = True, hashfunc: Optional[str] = None, dirs: bool = True
+) -> Iterator[FileProperties]:
 
     """Returns correct device id and file inode for py > 3.5 on windows if `extras=True`"""
 
@@ -38,8 +39,7 @@ def iter_dir(path, extra=True, hashfunc=None, dirs=True):
         )
 
 
-def iter_archiveorg_xml(path, hashfunc="sha1", dirs=None):
-    # type: (str, str, Optional[bool]) -> Iterator[FileProperties]
+def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
 
     assert hashfunc in ("sha1", "md5", "crc32")
 
@@ -62,8 +62,7 @@ def iter_archiveorg_xml(path, hashfunc="sha1", dirs=None):
             yield FileProperties(relpath, size, False, modtime=modtime, hash=hash)
 
 
-def iter_gamedat_xml(path, hashfunc="sha1", dirs=None):
-    # type: (str, str, Optional[bool]) -> Iterator[FileProperties]
+def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
 
     assert hashfunc in ("sha1", "md5", "crc32")
 
@@ -83,8 +82,13 @@ def iter_gamedat_xml(path, hashfunc="sha1", dirs=None):
             yield FileProperties(relpath, size, False, hash=hash)
 
 
-def iter_zip(archivefile, topleveldir=None, hashfunc="crc32", assume_utc=False, dirs=None):
-    # type: (str, Optional[str], str, bool, Optional[bool]) -> Iterator[FileProperties]
+def iter_zip(
+    archivefile: str,
+    topleveldir: Optional[str] = None,
+    hashfunc: str = "crc32",
+    assume_utc: bool = False,
+    dirs: Optional[bool] = None,
+) -> Iterator[FileProperties]:
 
     """If `topleveldir` is given, returned file paths will be relativ to this directory within the archive.
 
@@ -113,8 +117,9 @@ def iter_zip(archivefile, topleveldir=None, hashfunc="crc32", assume_utc=False, 
             yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=modtime, hash=f.CRC)
 
 
-def iter_rar(archivefile, topleveldir=None, hashfunc="crc32", dirs=None):
-    # type: (str, Optional[str], str, Optional[bool]) -> Iterator[FileProperties]
+def iter_rar(
+    archivefile: str, topleveldir: Optional[str] = None, hashfunc: str = "crc32", dirs: Optional[bool] = None
+) -> Iterator[FileProperties]:
 
     from rarfile import RarFile
 
@@ -131,8 +136,9 @@ def iter_rar(archivefile, topleveldir=None, hashfunc="crc32", dirs=None):
             yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=f.mtime, hash=f.CRC)
 
 
-def iter_archive(archivefile, topleveldir=None, hashfunc="crc32"):
-    # type: (str, Optional[str], str) -> Iterator[FileProperties]
+def iter_archive(
+    archivefile: str, topleveldir: Optional[str] = None, hashfunc: str = "crc32"
+) -> Iterator[FileProperties]:
 
     if archivefile.endswith(".zip"):
         return iter_zip(archivefile, topleveldir, hashfunc)
@@ -142,8 +148,9 @@ def iter_archive(archivefile, topleveldir=None, hashfunc="crc32"):
         raise ValueError("Unsupported archive format")
 
 
-def iter_syncthing(path, extra=True, versions=".stversions", hashfunc=None):
-    # type: (str, bool, str, Optional[str]) -> Iterator[FileProperties]
+def iter_syncthing(
+    path: str, extra: bool = True, versions: str = ".stversions", hashfunc: Optional[str] = None
+) -> Iterator[FileProperties]:
 
     """skips syncthing versions folder"""
 

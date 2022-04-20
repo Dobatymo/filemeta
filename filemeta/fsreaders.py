@@ -1,28 +1,23 @@
 import logging
 import platform
 import sqlite3
-from os import fspath, stat
+from os import PathLike, fspath, stat
 from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
 
 from genutility.filesystem import scandir_rec
 from genutility.sql import CursorContext
+from genutility.typing import Connection
 
 from .utils import is_signed_int_64, unsigned_to_signed_int_64
 
-if TYPE_CHECKING:
-    from os import PathLike
-
-    from genutility.typing import Connection
-
-    FileID = Tuple[int, int]
-    FilesDict = Dict[FileID, Tuple[str, str, int, int]]
-    FilesTuple = Tuple[int, int, str, str, int, int]
+FileID = Tuple[int, int]
+FilesDict = Dict[FileID, Tuple[str, str, int, int]]
+FilesTuple = Tuple[int, int, str, str, int, int]
 
 logger = logging.getLogger(__name__)
 
 
-def read_dir(path):
-    # type: (str, ) -> FilesDict
+def read_dir(path: str) -> FilesDict:
 
     root = path.replace("\\", "/")
 
@@ -68,8 +63,10 @@ def read_dir(path):
 
 
 class FilesDB:
-    def __init__(self, path, case_insensitive=None):
-        # type: (str, Optional[bool]) -> None
+
+    case_insensitive: bool
+
+    def __init__(self, path: str, case_insensitive: Optional[bool] = None) -> None:
 
         self.conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
         self.conn.isolation_level = None
@@ -79,8 +76,7 @@ class FilesDB:
         else:
             self.case_insensitive = case_insensitive
 
-    def init(self):
-        # type: () -> None
+    def init(self) -> None:
 
         create_table_query = """CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY,
@@ -109,21 +105,18 @@ class FilesDB:
             for query in create_index_queries:
                 cur.execute(query)
 
-    def get_connection(self):
-        # type: () -> Connection
+    def get_connection(self) -> Connection:
 
         return self.conn
 
-    def get(self, deleted=False):
-        # type: (bool, ) -> Iterator[FilesTuple]
+    def get(self, deleted: bool = False) -> Iterator[FilesTuple]:
 
         query = "SELECT device, inode, root, path, filesize, utcmtime FROM files WHERE deleted=?"
 
         with CursorContext(self.conn) as cursor:
             yield from cursor.execute(query, (int(deleted),))
 
-    def get_by_root(self, root, deleted=False):
-        # type: (PathLike, bool) -> Iterator[FilesTuple]
+    def get_by_root(self, root: PathLike, deleted: bool = False) -> Iterator[FilesTuple]:
 
         root = fspath(root).replace("\\", "/")
         if self.case_insensitive:
@@ -134,8 +127,7 @@ class FilesDB:
         with CursorContext(self.conn) as cursor:
             yield from cursor.execute(query, (int(deleted), root))
 
-    def read_database(self, path, deleted=False):
-        # type: (PathLike, bool) -> FilesDict
+    def read_database(self, path: PathLike, deleted: bool = False) -> FilesDict:
 
         return {
             (device, inode): (root, path, filesize, utcmtime)

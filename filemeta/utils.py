@@ -36,27 +36,23 @@ def print(*msg, end="\x1b[0K\n", **kwargs):
     _print(*msg, end=end, **kwargs)
 
 
-def is_signed_int_64(num):
-    # type: (int, ) -> bool
+def is_signed_int_64(num: int) -> bool:
 
     return -(2**63) <= num <= 2**63 - 1
 
 
-def unsigned_to_signed_int_64(num):
-    # type: (int, ) -> int
+def unsigned_to_signed_int_64(num: int) -> int:
 
     return num - 2**63
 
 
-def signed_to_unsigned_int_64(num):
-    # type: (int, ) -> int
+def signed_to_unsigned_int_64(num: int) -> int:
 
     return num + 2**63
 
 
 class OpenFileOrUrl:
-    def __init__(self, path, mode="rt", encoding="utf-8"):
-        # type: (str, str, Optional[str]) -> None
+    def __init__(self, path: str, mode: str = "rt", encoding: Optional[str] = "utf-8") -> None:
 
         self.encoding = encoding
 
@@ -75,28 +71,25 @@ class OpenFileOrUrl:
                 fileobj = r.raw
 
             if "t" in mode:
-                self.f = TextIOWrapper(fileobj, encoding=self.encoding)  # type: Union[GzipFile, IO]
+                self.f: Union[GzipFile, IO] = TextIOWrapper(fileobj, encoding=self.encoding)
             else:
                 self.f = fileobj
         else:
             self.f = open(path, mode, encoding=self.encoding)
 
-    def __enter__(self):
-        # type: () -> Union[GzipFile, IO]
+    def __enter__(self) -> Union[GzipFile, IO]:
 
         return self.f
 
     def __exit__(self, *args):
         self.close()
 
-    def close(self):
-        # type: () -> None
+    def close(self) -> None:
 
         self.f.close()
 
 
-def iterable_to_dict_by_key(by, it):
-    # type: (str, Iterable[T]) -> Dict[HashableLessThan, T]
+def iterable_to_dict_by_key(by: str, it: Iterable[T]) -> Dict[HashableLessThan, T]:
 
     # todo: check if there are duplicated keys and warn about them
 
