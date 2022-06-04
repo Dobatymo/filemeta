@@ -2,7 +2,7 @@ import logging
 import platform
 import sqlite3
 from os import PathLike, fspath, stat
-from typing import TYPE_CHECKING, Dict, Iterator, Optional, Tuple
+from typing import Dict, Iterator, Optional, Tuple
 
 from genutility.filesystem import scandir_rec
 from genutility.sql import CursorContext

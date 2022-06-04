@@ -10,17 +10,36 @@ from zipfile import ZipFile
 
 from genutility.datetime import datetime_from_utc_timestamp, datetime_from_utc_timestamp_ns
 from genutility.filesystem import FileProperties, scandir_rec
+from genutility.hash import hash_filelike
 
 from .utils import OpenFileOrUrl
 
 
 def iter_dir(
-    path: str, extra: bool = True, hashfunc: Optional[str] = None, dirs: bool = True
+    path: str,
+    extra: bool = True,
+    hashfunc: Optional[str] = None,
+    dirs: bool = True,
+    recurse_archives: bool = False,
+    hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
 
     """Returns correct device id and file inode for py > 3.5 on windows if `extras=True`"""
 
     for entry in scandir_rec(path, files=True, dirs=dirs, relative=True):
+
+        relpath = entry.relpath.replace("\\", "/")
+        abspath = entry.path
+
+        if recurse_archives:
+            try:
+                for prop in iter_archive(entry.path, hashfunc=hashfunc, hash_from_meta=hash_from_meta):
+                    prop.relpath = f"{relpath}:/{prop.relpath}"
+                    prop.abspath = f"{abspath}:/{prop.relpath}"
+                    yield prop
+                continue
+            except ValueError:
+                pass
 
         if extra:
             stat = os.stat(entry.path)
@@ -30,10 +49,10 @@ def iter_dir(
         modtime = datetime_from_utc_timestamp_ns(stat.st_mtime_ns)
 
         yield FileProperties(
-            entry.relpath.replace("\\", "/"),
+            relpath,
             stat.st_size,
             entry.is_dir(),
-            entry.path,
+            abspath,
             (stat.st_dev, stat.st_ino),
             modtime,
         )
@@ -82,12 +101,24 @@ def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = N
             yield FileProperties(relpath, size, False, hash=hash)
 
 
+def _archive_hash(af, f, hashfunc: Optional[str], hash_from_meta: bool):
+    if hash_from_meta:
+        return f.CRC
+    else:
+        if hashfunc is None:
+            return None
+        else:
+            with af.open(f, "r") as fr:
+                return hash_filelike(fr, hashfunc)
+
+
 def iter_zip(
     archivefile: str,
     topleveldir: Optional[str] = None,
-    hashfunc: str = "crc32",
+    hashfunc: Optional[str] = "crc32",
     assume_utc: bool = False,
     dirs: Optional[bool] = None,
+    hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
 
     """If `topleveldir` is given, returned file paths will be relativ to this directory within the archive.
@@ -96,7 +127,8 @@ def iter_zip(
     in the zip file. Otherwise it's assumed to be UTC.
     """
 
-    assert hashfunc in {"crc32"}
+    if hash_from_meta and hashfunc is not None and hashfunc not in {"crc32"}:
+        raise ValueError(f"Unsupported hash function: {hashfunc}")
 
     with ZipFile(archivefile, "r") as af:
         for f in af.infolist():
@@ -114,16 +146,22 @@ def iter_zip(
                 # interpret as local time
                 modtime = datetime(year, month, day, hour, minute, second).astimezone(timezone.utc)
 
-            yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=modtime, hash=f.CRC)
+            hash = _archive_hash(af, f, hashfunc, hash_from_meta)
+            yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=modtime, hash=hash)
 
 
 def iter_rar(
-    archivefile: str, topleveldir: Optional[str] = None, hashfunc: str = "crc32", dirs: Optional[bool] = None
+    archivefile: str,
+    topleveldir: Optional[str] = None,
+    hashfunc: Optional[str] = "crc32",
+    dirs: Optional[bool] = None,
+    hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
 
     from rarfile import RarFile
 
-    assert hashfunc in {"crc32"}
+    if hash_from_meta and hashfunc is not None and hashfunc not in {"crc32"}:
+        raise ValueError(f"Unsupported hash function: {hashfunc}")
 
     with RarFile(archivefile, "r") as af:
         for f in af.infolist():
@@ -133,19 +171,24 @@ def iter_rar(
             else:
                 relpath = f.filename
 
-            yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=f.mtime, hash=f.CRC)
+            hash = _archive_hash(af, f, hashfunc, hash_from_meta)
+            yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=f.mtime, hash=hash)
 
 
 def iter_archive(
-    archivefile: str, topleveldir: Optional[str] = None, hashfunc: str = "crc32"
+    archivefile: str,
+    topleveldir: Optional[str] = None,
+    hashfunc: str = "crc32",
+    hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
 
     if archivefile.endswith(".zip"):
-        return iter_zip(archivefile, topleveldir, hashfunc)
+        return iter_zip(archivefile, topleveldir, hashfunc, hash_from_meta=hash_from_meta)
     elif archivefile.endswith(".rar"):
-        return iter_rar(archivefile, topleveldir, hashfunc)
+        return iter_rar(archivefile, topleveldir, hashfunc, hash_from_meta=hash_from_meta)
     else:
-        raise ValueError("Unsupported archive format")
+        basename = os.path.basename(archivefile)
+        raise ValueError(f"Unsupported archive format: {basename}")
 
 
 def iter_syncthing(

@@ -4,7 +4,7 @@ from gzip import GzipFile
 from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
-from typing import IO, Any, Dict, Iterable, List, Optional, Protocol, TypeVar, Union
+from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union
 
 import requests
 from genutility.file import _check_arguments
@@ -89,8 +89,11 @@ class OpenFileOrUrl:
         self.f.close()
 
 
-def iterable_to_dict_by_key(by: str, it: Iterable[T]) -> Dict[HashableLessThan, T]:
+def iterable_to_dict_by_key(by: str, it: Iterable[T], apply: Optional[Callable] = None) -> Dict[HashableLessThan, T]:
 
     # todo: check if there are duplicated keys and warn about them
 
-    return {getattr(props, by): props for props in it}
+    if apply is None:
+        return {getattr(props, by): props for props in it}
+    else:
+        return {apply(getattr(props, by)): props for props in it}
