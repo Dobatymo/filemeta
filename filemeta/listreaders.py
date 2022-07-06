@@ -109,7 +109,7 @@ def _archive_hash(af, f, hashfunc: Optional[str], hash_from_meta: bool):
             return None
         else:
             with af.open(f, "r") as fr:
-                return hash_filelike(fr, hashfunc)
+                return hash_filelike(fr, hashfunc).hexdigest()
 
 
 def iter_zip(
