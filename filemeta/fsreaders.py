@@ -18,7 +18,6 @@ logger = logging.getLogger(__name__)
 
 
 def read_dir(path: str) -> FilesDict:
-
     root = path.replace("\\", "/")
 
     def scandir_error_log(entry, exception):
@@ -28,7 +27,6 @@ def read_dir(path: str) -> FilesDict:
         for entry in scandir_rec(
             path, files=True, dirs=False, relative=True, follow_symlinks=False, errorfunc=scandir_error_log
         ):
-
             try:
                 stats = stat(entry.path)
             except (PermissionError, FileNotFoundError) as e:
@@ -63,11 +61,9 @@ def read_dir(path: str) -> FilesDict:
 
 
 class FilesDB:
-
     case_insensitive: bool
 
     def __init__(self, path: str, case_insensitive: Optional[bool] = None) -> None:
-
         self.conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
         self.conn.isolation_level = None
 
@@ -77,7 +73,6 @@ class FilesDB:
             self.case_insensitive = case_insensitive
 
     def init(self) -> None:
-
         create_table_query = """CREATE TABLE IF NOT EXISTS files (
             id INTEGER PRIMARY KEY,
             begin_date TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -106,18 +101,15 @@ class FilesDB:
                 cur.execute(query)
 
     def get_connection(self) -> Connection:
-
         return self.conn
 
     def get(self, deleted: bool = False) -> Iterator[FilesTuple]:
-
         query = "SELECT device, inode, root, path, filesize, utcmtime FROM files WHERE deleted=?"
 
         with CursorContext(self.conn) as cursor:
             yield from cursor.execute(query, (int(deleted),))
 
     def get_by_root(self, root: PathLike, deleted: bool = False) -> Iterator[FilesTuple]:
-
         root = fspath(root).replace("\\", "/")
         if self.case_insensitive:
             query = "SELECT device, inode, root, path, filesize, utcmtime FROM files WHERE deleted=? AND root=? COLLATE NOCASE"
@@ -128,7 +120,6 @@ class FilesDB:
             yield from cursor.execute(query, (int(deleted), root))
 
     def read_database(self, path: PathLike, deleted: bool = False) -> FilesDict:
-
         return {
             (device, inode): (root, path, filesize, utcmtime)
             for device, inode, root, path, filesize, utcmtime in self.get_by_root(path, deleted)

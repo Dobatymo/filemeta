@@ -23,11 +23,9 @@ def iter_dir(
     recurse_archives: bool = False,
     hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
-
     """Returns correct device id and file inode for py > 3.5 on windows if `extras=True`"""
 
     for entry in scandir_rec(path, files=True, dirs=dirs, relative=True):
-
         relpath = entry.relpath.replace("\\", "/")
         abspath = entry.path
 
@@ -59,7 +57,6 @@ def iter_dir(
 
 
 def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
-
     assert hashfunc in ("sha1", "md5", "crc32")
 
     skip_formats = {"Metadata", "Archive BitTorrent", "Item Tile"}
@@ -82,7 +79,6 @@ def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] 
 
 
 def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
-
     assert hashfunc in ("sha1", "md5", "crc32")
 
     hashfunc = {
@@ -120,7 +116,6 @@ def iter_zip(
     dirs: Optional[bool] = None,
     hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
-
     """If `topleveldir` is given, returned file paths will be relativ to this directory within the archive.
 
     If `assume_utc` is False (the default), it is assumed that local time is stored
@@ -132,7 +127,6 @@ def iter_zip(
 
     with ZipFile(archivefile, "r") as af:
         for f in af.infolist():
-
             if topleveldir:
                 relpath = os.path.relpath(f.filename, topleveldir)
             else:
@@ -157,7 +151,6 @@ def iter_rar(
     dirs: Optional[bool] = None,
     hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
-
     from rarfile import RarFile
 
     if hash_from_meta and hashfunc is not None and hashfunc not in {"crc32"}:
@@ -165,7 +158,6 @@ def iter_rar(
 
     with RarFile(archivefile, "r") as af:
         for f in af.infolist():
-
             if topleveldir:
                 relpath = os.path.relpath(f.filename, topleveldir)
             else:
@@ -181,7 +173,6 @@ def iter_archive(
     hashfunc: str = "crc32",
     hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
-
     if archivefile.endswith(".zip"):
         return iter_zip(archivefile, topleveldir, hashfunc, hash_from_meta=hash_from_meta)
     elif archivefile.endswith(".rar"):
@@ -194,7 +185,6 @@ def iter_archive(
 def iter_syncthing(
     path: str, extra: bool = True, versions: str = ".stversions", hashfunc: Optional[str] = None
 ) -> Iterator[FileProperties]:
-
     """skips syncthing versions folder"""
 
     for entry in scandir_rec(path, files=True, dirs=True, relative=True, allow_skip=True):

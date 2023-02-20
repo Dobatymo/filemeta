@@ -48,7 +48,6 @@ def funpack(fr: IO[bytes], fmt: str) -> tuple:
 def read_bytes_to_namedtuple(
     fr: IO[bytes], fmt: str, namedtuplecls: Type[namedtuple], conv: Optional[Dict[int, Callable]] = None
 ) -> namedtuple:
-
     fields = funpack(fr, fmt)
 
     if conv:
@@ -68,7 +67,6 @@ def fbitunpack(fr: IO[bytes], fmt: str) -> tuple:
 def read_bits_to_namedtuple(
     fr: IO[bytes], fmt: str, namedtuplecls: Type[namedtuple], conv: Optional[Dict[int, Callable]] = None
 ) -> namedtuple:
-
     fields = fbitunpack(fr, fmt)
 
     if conv:
@@ -269,7 +267,6 @@ def id3_sync_safe_to_int(sync_safe: bytes) -> int:
 
 
 def get_frame_length(header: Mp3Header) -> int:
-
     try:
         samplerate = SAMPLE_RATE_MAP[header.frequency][header.id]
     except KeyError:
@@ -285,11 +282,9 @@ def get_frame_length(header: Mp3Header) -> int:
 
 
 def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
-
     single_channel = header.mode == Mode.SINGLE_CHANNEL
 
     if single_channel:
-
         SIDE_INFORMATION_SINGLE_FMT_1 = "u9 r5 r4"  # 18
         # -> 18
         SIDE_INFORMATION_SINGLE_FMT_2 = "r12 r9 r8 r4 b1"  # 34
@@ -306,7 +301,6 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
         delta += 18
 
         for i in range(2):
-
             par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
                 SIDE_INFORMATION_SINGLE_FMT_2, data, delta
             )
@@ -349,7 +343,6 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
         delta += 20
 
         for i in range(2):
-
             par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
                 SIDE_INFORMATION_NONSINGLE_FMT_2, data, delta
             )
@@ -397,7 +390,6 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
 
 
 def read_frame(fr: IO[bytes]):
-
     HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
 
     pos = fr.tell()
@@ -448,7 +440,6 @@ def read_id3v2(fr: IO[bytes], parse: bool = False) -> Tuple[int, Id3v2Header]:
 
 
 def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[Id3v1Fields, Id3v11Fields]]]:
-
     # see <http://id3lib.sourceforge.net/id3/id3v1.html>
 
     pos = fr.tell()
@@ -481,7 +472,6 @@ def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[I
 
 
 def read_apev2(fr: IO[bytes]) -> Tuple[int, APEv2Header]:
-
     pos = fr.tell()
     tag = read_or_raise(fr, 8)
 
@@ -497,7 +487,6 @@ def read_apev2(fr: IO[bytes]) -> Tuple[int, APEv2Header]:
 
 
 def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
-
     # see <https://id3.org/Lyrics3>
     # see <http://id3lib.sourceforge.net/id3/lyrics3.html>
 
@@ -517,7 +506,6 @@ def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
 
 
 def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
-
     # see <https://id3.org/Lyrics3v2>
     # see <http://id3lib.sourceforge.net/id3/lyrics3200.html>
 
@@ -535,7 +523,6 @@ def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
 
     try:
         while True:
-
             size_, tag = funpack(fr, "6s9s")
             if tag == b"LYRICS200":
                 break
@@ -559,7 +546,6 @@ def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
 
 def read_mp3(path):
     with open(path, "rb") as fr:
-
         try:
             yield read_id3v2(fr)
         except RuntimeError:
@@ -573,7 +559,6 @@ def read_mp3(path):
                 else:
                     yield frame
             except OutOfSync as e:
-
                 fr.seek(e.pos)
 
                 for func in [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]:

@@ -18,7 +18,6 @@ def exif_key_label(name: str) -> str:
 
 
 def exif_value_label(name: str, value: int, reserved="reserved") -> str:
-
     try:
         return exif_value_labels[name].get(str(value), reserved)
     except KeyError:
@@ -37,7 +36,6 @@ def recstr(obj: Any) -> str:
 
 
 def exif_table(path: str) -> Iterator[Tuple[str, str, str, Any, str]]:
-
     # see Exif Version 2.2 docs
 
     exif = piexif.load(path)

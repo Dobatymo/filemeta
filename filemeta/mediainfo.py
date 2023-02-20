@@ -33,7 +33,6 @@ is_two_integers = re.compile(r"^([0-9]+) \/ ([0-9]+)$")
 
 
 def integer(s: Union[str, int]) -> int:
-
     if isinstance(s, str):
         m1 = is_integer.match(s)
         m2 = is_two_integers.match(s)
@@ -63,7 +62,6 @@ def get_conversion_func(s: str) -> Callable[[Any], Any]:
 
 
 def guess_type(s: str) -> Optional[str]:
-
     if "Yes" in s or "No" in s:
         return "boolean"
 
@@ -90,12 +88,10 @@ widen_type_to = {
 
 
 class MediaInfoFields:
-
     mi_fields_name = "data/mediainfo-fields.json"
     mi_types_name = "data/mediainfo-types.json"
 
     def __init__(self):
-
         self.mi_fields_path = pkg_resources.resource_filename(__package__, self.mi_fields_name)
         self.mi_types_path = pkg_resources.resource_filename(__package__, self.mi_types_name)
 
@@ -108,7 +104,6 @@ class MediaInfoFields:
 
     @staticmethod
     def get_mi_fields(path: str) -> Dict[str, Dict[str, FrozenSet[str]]]:
-
         mi_fields = read_json(path)
         for k, v in mi_fields.items():
             mi_fields[k] = {track: frozenset(fields) for track, fields in v.items()}
@@ -121,7 +116,6 @@ class MediaInfoFields:
 
     @staticmethod
     def get_mi_types(path: str) -> Dict[str, Dict[str, Callable]]:
-
         mi_types = read_json(path)
         return mi_types
 
@@ -132,7 +126,6 @@ class MediaInfoFields:
     def mediainfo(
         self, path: str, logged_keys: Optional[Dict[str, Set[Tuple[str, str]]]]
     ) -> Iterator[Tuple[Tuple[str, str], Any]]:
-
         try:
             media_info = MediaInfo.parse(path)
         except ElementTree.ParseError as e:
