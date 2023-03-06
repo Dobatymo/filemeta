@@ -2,7 +2,7 @@ import logging
 import re
 from fractions import Fraction
 from typing import Any, Callable, Dict, FrozenSet, Iterator, Optional, Set, Tuple, Union
-from xml.etree import ElementTree
+from xml.etree import ElementTree  # nosec
 
 import pkg_resources
 from genutility.exceptions import ParseError

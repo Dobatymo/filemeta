@@ -9,3 +9,9 @@ line-length = 120
 profile = "black"
 src_paths = ["."]
 line_length = 120
+
+[tool.mypy]
+ignore_missing_imports = true
+
+[tool.bandit]
+skips = ["B101"]

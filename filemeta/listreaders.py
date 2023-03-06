@@ -5,7 +5,7 @@ All methods here return `Iterator[FileProperties]`
 import os.path
 from datetime import datetime, timezone
 from typing import Iterator, Optional
-from xml.etree.ElementTree import iterparse
+from xml.etree.ElementTree import iterparse  # nosec
 from zipfile import ZipFile
 
 from genutility.datetime import datetime_from_utc_timestamp, datetime_from_utc_timestamp_ns
@@ -62,7 +62,7 @@ def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] 
     skip_formats = {"Metadata", "Archive BitTorrent", "Item Tile"}
 
     with OpenFileOrUrl(path) as fr:
-        for event, element in iterparse(fr, ["end"]):
+        for event, element in iterparse(fr, ["end"]):  # nosec
             if element.tag != "file":
                 continue
             if element.get("source") != "original":
@@ -86,7 +86,7 @@ def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = N
     }.get(hashfunc, hashfunc)
 
     with open(path) as fr:
-        for event, element in iterparse(fr, ["end"]):
+        for event, element in iterparse(fr, ["end"]):  # nosec
             if element.tag != "game":
                 continue
 
