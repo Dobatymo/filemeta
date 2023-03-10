@@ -47,7 +47,7 @@ repos:
         args: ["--install-types", "--non-interactive", "--show-error-codes"]
         additional_dependencies:
           - bitstruct==8.17.0
-          - genutility[json]==0.0.86
+          - genutility[json]==0.0.97
           - piexif==1.1.3
           - pymediainfo==5.1.0
           - requests==2.28.2

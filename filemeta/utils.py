@@ -47,29 +47,43 @@ def signed_to_unsigned_int_64(num: int) -> int:
     return num + 2**63
 
 
+def get_url_fp(path: str, mode: str, encoding: str) -> Union[GzipFile, IO]:
+    if "w" in mode:
+        raise ValueError("Cannot write mode for URLs")
+
+    r = requests.get(path, stream=True)
+    r.raise_for_status()
+    if r.headers.get("content-encoding", None) == "gzip":
+        fileobj = GzipFile(fileobj=r.raw)
+    else:
+        fileobj = r.raw
+
+    if "t" in mode:
+        return TextIOWrapper(fileobj, encoding=encoding)
+    else:
+        return fileobj
+
+
+class SmartPath:
+    def __init__(self, path: str):
+        self.path = path
+
+    def open(self, mode: str = "rt", encoding: Optional[str] = None):
+        encoding = _check_arguments(mode, encoding)
+        if self.path.startswith(("http://", "https://")):
+            return get_url_fp(self.path, mode, encoding)
+        else:
+            return open(self.path, mode, encoding=encoding)
+
+
 class OpenFileOrUrl:
     def __init__(self, path: str, mode: str = "rt", encoding: Optional[str] = "utf-8") -> None:
-        self.encoding = encoding
-
         encoding = _check_arguments(mode, encoding)
 
         if path.startswith(("http://", "https://")):
-            if "w" in mode:
-                raise ValueError("Cannot write mode for URLs")
-
-            r = requests.get(path, stream=True)
-            r.raise_for_status()
-            if r.headers["content-encoding"] == "gzip":
-                fileobj = GzipFile(fileobj=r.raw)
-            else:
-                fileobj = r.raw
-
-            if "t" in mode:
-                self.f: Union[GzipFile, IO] = TextIOWrapper(fileobj, encoding=self.encoding)
-            else:
-                self.f = fileobj
+            self.f = get_url_fp(path, mode, encoding)
         else:
-            self.f = open(path, mode, encoding=self.encoding)
+            self.f = open(path, mode, encoding=encoding)
 
     def __enter__(self) -> Union[GzipFile, IO]:
         return self.f
