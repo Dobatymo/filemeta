@@ -4,7 +4,7 @@ from gzip import GzipFile
 from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
-from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union
+from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union, cast
 
 import requests
 from genutility.file import _check_arguments
@@ -21,6 +21,7 @@ class HashableLessThan(Protocol):
 
 
 DEFAULT_DB_PATH = f"{platform.node()}-catalog.db"
+DEFAULT_TIMEOUT = 60
 
 
 def get_all_drives_windows() -> List[Path]:
@@ -47,19 +48,19 @@ def signed_to_unsigned_int_64(num: int) -> int:
     return num + 2**63
 
 
-def get_url_fp(path: str, mode: str, encoding: str) -> Union[GzipFile, IO]:
+def get_url_fp(path: str, mode: str, encoding: Optional[str]) -> Union[GzipFile, IO]:
     if "w" in mode:
         raise ValueError("Cannot write mode for URLs")
 
-    r = requests.get(path, stream=True)
+    r = requests.get(path, timeout=DEFAULT_TIMEOUT, stream=True)
     r.raise_for_status()
     if r.headers.get("content-encoding", None) == "gzip":
-        fileobj = GzipFile(fileobj=r.raw)
+        fileobj = cast(IO[bytes], GzipFile(fileobj=r.raw))
     else:
         fileobj = r.raw
 
     if "t" in mode:
-        return TextIOWrapper(fileobj, encoding=encoding)
+        return TextIOWrapper(fileobj, encoding)
     else:
         return fileobj
 

@@ -1,10 +1,10 @@
 import logging
 import re
 from fractions import Fraction
-from typing import Any, Callable, Dict, FrozenSet, Iterator, Optional, Set, Tuple, Union
+from typing import Any, Callable, Dict, FrozenSet, Iterator, List, Optional, Set, Tuple, Union
 from xml.etree import ElementTree  # nosec
 
-import pkg_resources
+import importlib_resources
 from genutility.exceptions import ParseError
 from genutility.json import BuiltinEncoder, read_json, write_json
 from pymediainfo import MediaInfo
@@ -92,8 +92,8 @@ class MediaInfoFields:
     mi_types_name = "data/mediainfo-types.json"
 
     def __init__(self):
-        self.mi_fields_path = pkg_resources.resource_filename(__package__, self.mi_fields_name)
-        self.mi_types_path = pkg_resources.resource_filename(__package__, self.mi_types_name)
+        self.mi_fields_path = importlib_resources.files(__package__).joinpath(self.mi_fields_name)
+        self.mi_types_path = importlib_resources.files(__package__).joinpath(self.mi_types_name)
 
         self.mi_fields = self.get_mi_fields(self.mi_fields_path)
         self.mi_types = self.get_mi_types(self.mi_types_path)
@@ -104,9 +104,8 @@ class MediaInfoFields:
 
     @staticmethod
     def get_mi_fields(path: str) -> Dict[str, Dict[str, FrozenSet[str]]]:
-        mi_fields = read_json(path)
-        for k, v in mi_fields.items():
-            mi_fields[k] = {track: frozenset(fields) for track, fields in v.items()}
+        mi_fields: Dict[str, Dict[str, List[str]]] = read_json(path)
+        mi_fields = {k: {track: frozenset(fields) for track, fields in v.items()} for k, v in mi_fields.items()}
 
         return mi_fields
 
@@ -115,8 +114,8 @@ class MediaInfoFields:
         write_json(mi_fields, path, indent="\t", sort_keys=True, cls=BuiltinEncoder, safe=True, sort_sets=True)
 
     @staticmethod
-    def get_mi_types(path: str) -> Dict[str, Dict[str, Callable]]:
-        mi_types = read_json(path)
+    def get_mi_types(path: str) -> Dict[str, Dict[str, str]]:
+        mi_types: Dict[str, Dict[str, str]] = read_json(path)
         return mi_types
 
     @staticmethod
