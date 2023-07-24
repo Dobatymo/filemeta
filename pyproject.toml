@@ -11,13 +11,14 @@ src_paths = ["."]
 line_length = 120
 
 [tool.mypy]
+allow_redefinition = true
 ignore_missing_imports = true
+local_partial_types = true
+no_implicit_optional = true
 warn_redundant_casts = true
 warn_unused_configs = true
 warn_unused_ignores = true
 warn_return_any = true
-allow_redefinition = true
-local_partial_types = true
 strict_equality = true
 
 [tool.bandit]

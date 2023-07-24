@@ -138,7 +138,7 @@ def iter_zip(
                 modtime = datetime(year, month, day, hour, minute, second, tzinfo=timezone.utc)
             else:
                 # interpret as local time
-                modtime = datetime(year, month, day, hour, minute, second).astimezone(timezone.utc)
+                modtime = datetime(year, month, day, hour, minute, second).astimezone()
 
             hash = _archive_hash(af, f, hashfunc, hash_from_meta)
             yield FileProperties(relpath, f.file_size, f.is_dir(), modtime=modtime, hash=hash)

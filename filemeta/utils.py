@@ -5,6 +5,7 @@ from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
 from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union, cast
+import warnings
 
 import requests
 from genutility.file import _check_arguments
@@ -104,14 +105,25 @@ def getattrnotnone(obj: Any, attr: str) -> Any:
 
 
 def iterable_to_dict_by_key(
-    by: str, it: Iterable[T], apply: Optional[Callable] = None, check_none: bool = True
+    by: str, it: Iterable[T], apply: Optional[Callable] = None, check_none: bool = True, warn_dups: bool = True
 ) -> Dict[HashableLessThan, T]:
-    # todo: check if there are duplicated keys and warn about them
 
     if check_none:
         getattr = getattrnotnone
 
-    if apply is None:
-        return {getattr(props, by): props for props in it}
+    if warn_dups:
+        ret = {}
+        for props in it:
+            if apply is None:
+                key = getattr(props, by)
+            else:
+                key = apply(getattr(props, by))
+            if key in ret:
+                warnings.warn("Ignoring duplicated entries")
+            ret[key] = props
+        return ret
     else:
-        return {apply(getattr(props, by)): props for props in it}
+        if apply is None:
+            return {getattr(props, by): props for props in it}
+        else:
+            return {apply(getattr(props, by)): props for props in it}
