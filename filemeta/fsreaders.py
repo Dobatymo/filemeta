@@ -6,6 +6,7 @@ from typing import Dict, Iterator, Optional, Tuple
 
 from genutility.filesystem import scandir_rec
 from genutility.sql import CursorContext
+from genutility.sqlite import to_uri
 from genutility.typing import Connection
 
 from .utils import is_signed_int_64, unsigned_to_signed_int_64
@@ -63,8 +64,12 @@ def read_dir(path: str) -> FilesDict:
 class FilesDB:
     case_insensitive: bool
 
-    def __init__(self, path: str, case_insensitive: Optional[bool] = None) -> None:
-        self.conn = sqlite3.connect(path, detect_types=sqlite3.PARSE_DECLTYPES)
+    def __init__(self, path: str, case_insensitive: Optional[bool] = None, readonly: bool = False) -> None:
+        if readonly:
+            uri = to_uri(path, mode="ro")
+        else:
+            uri = to_uri(path)
+        self.conn = sqlite3.connect(uri, detect_types=sqlite3.PARSE_DECLTYPES, uri=True)
         self.conn.isolation_level = None
 
         if case_insensitive is None:

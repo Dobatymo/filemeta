@@ -1,11 +1,11 @@
 import platform
+import warnings
 from builtins import print as _print
 from gzip import GzipFile
 from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
 from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union, cast
-import warnings
 
 import requests
 from genutility.file import _check_arguments
@@ -107,7 +107,6 @@ def getattrnotnone(obj: Any, attr: str) -> Any:
 def iterable_to_dict_by_key(
     by: str, it: Iterable[T], apply: Optional[Callable] = None, check_none: bool = True, warn_dups: bool = True
 ) -> Dict[HashableLessThan, T]:
-
     if check_none:
         getattr = getattrnotnone
 
