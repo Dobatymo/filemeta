@@ -1,15 +1,18 @@
 import logging
+import os
 import struct
 from collections import namedtuple
 from enum import IntEnum
-from os import SEEK_CUR, SEEK_SET
-from typing import IO, Callable, Dict, Iterable, List, Optional, Tuple, Type, Union
+from typing import IO, Callable, Dict, Iterable, Iterator, List, Optional, Tuple, Type, Union
 
 import bitstruct
+from fastcrc import crc16
 from genutility.exceptions import ParseError
 from genutility.file import Empty, read_or_raise
 
 logger = logging.getLogger(__name__)
+
+PathType = Union[str, os.PathLike]
 
 # general exceptions
 
@@ -56,23 +59,26 @@ def read_bytes_to_namedtuple(
     return namedtuplecls._make(fields)
 
 
-def fbitunpack(fr: IO[bytes], fmt: str) -> tuple:
+def fbitunpack(fr: IO[bytes], fmt: str) -> Tuple[bytes, tuple]:
     num_bits = bitstruct.calcsize(fmt)
     num_bytes, remainder = divmod(num_bits, 8)
     assert remainder == 0
 
-    return bitstruct.unpack(fmt, read_or_raise(fr, num_bytes))
+    raw = read_or_raise(fr, num_bytes)
+    parsed = bitstruct.unpack(fmt, raw)
+    return (raw, parsed)
 
 
 def read_bits_to_namedtuple(
     fr: IO[bytes], fmt: str, namedtuplecls: Type[namedtuple], conv: Optional[Dict[int, Callable]] = None
-) -> namedtuple:
-    fields = fbitunpack(fr, fmt)
+) -> Tuple[bytes, namedtuple]:
+    raw, fields = fbitunpack(fr, fmt)
 
     if conv:
         fields = transform_iterable(fields, conv)
 
-    return namedtuplecls._make(fields)
+    parsed = namedtuplecls._make(fields)
+    return raw, parsed
 
 
 # named tuples
@@ -281,7 +287,7 @@ def get_frame_length(header: Mp3Header) -> int:
     return int(144 * bitrate * 1000 / samplerate + header.padding)
 
 
-def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
+def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInformation]:
     single_channel = header.mode == Mode.SINGLE_CHANNEL
 
     if single_channel:
@@ -386,16 +392,30 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Mp3SideInformation:
         count1table_select,
     )
 
-    return Mp3SideInformation._make(side_information_tuple)
+    return data, Mp3SideInformation._make(side_information_tuple)
 
 
-def read_frame(fr: IO[bytes]):
+class IntegrityCheckFailed(Exception):
+    pass
+
+
+MpegAudioFrame = namedtuple("MpegAudioFrame", ["pos", "header", "crc", "sideinfo"])
+
+
+def read_frame(
+    fr: IO[bytes], content: bool = False, verify: bool = False
+) -> Optional[Tuple[Optional[bytes], MpegAudioFrame]]:
     HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
 
+    if verify and not content:
+        raise ValueError("verify requires content")
+
     pos = fr.tell()
+    raw: List[bytes] = []
 
     try:
-        header = fbitunpack(fr, HEADER_FMT)
+        raw_header, header = fbitunpack(fr, HEADER_FMT)
+        raw.append(raw_header)
     except Empty:  # end of file
         return
 
@@ -404,29 +424,54 @@ def read_frame(fr: IO[bytes]):
     if header.sync != 2047:
         raise OutOfSync(pos, header)
 
-    if header.protection:
-        crc = fr.read(2)
+    if not header.protection:  # False means CRC data available
+        raw_crc = read_or_raise(fr, 2)
+        raw.append(raw_crc)
+        crc: Optional[int] = int.from_bytes(raw_crc, "big")
     else:
         crc = None
 
-    sideinfo = read_sideinfo(fr, header)
+    raw_sideinfo, sideinfo = read_sideinfo(fr, header)
+    raw.append(raw_sideinfo)
+
+    if crc is not None and verify:
+        if header.layer != Layer.LAYER_III:
+            raise ValueError(
+                f"Integrity check is only supported for layer 3 files currently, not {Layer(header.layer).name}"
+            )
+
+        calculated_crc = crc16.cms(raw_header[2:] + raw_sideinfo)
+        if crc != calculated_crc:
+            raise IntegrityCheckFailed(f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}")
 
     # main_data, ancillary data
 
     frame_length = get_frame_length(header)
-    fr.seek(pos + frame_length, SEEK_SET)
+    if content:
+        delta = sum(map(len, raw))
+        raw_content = read_or_raise(fr, frame_length - delta)
+        raw.append(raw_content)
+        raw_out: Optional[bytes] = b"".join(raw)
+    else:
+        raw_out = None
+        fr.seek(pos + frame_length, os.SEEK_SET)
 
-    return pos, header, crc, sideinfo
+    parsed = pos, header, crc, sideinfo
+    return raw_out, MpegAudioFrame._make(parsed)
 
 
-def read_id3v2(fr: IO[bytes], parse: bool = False) -> Tuple[int, Id3v2Header]:
+Id3v2Fields = tuple
+Id3v2Tag = Tuple[int, Id3v2Header, Optional[Id3v2Fields]]
+
+
+def read_id3v2(fr: IO[bytes], parse: bool = False) -> Id3v2Tag:
     pos = fr.tell()
 
     if fr.read(3) != b"ID3":
         raise WrongSignature("No ID3v2")
 
     fmt = ">u8 u8 b1 b1 b1 b1 b1 b1 b1 b1 r32"
-    id3_header = read_bits_to_namedtuple(fr, fmt, Id3v2Header, {10: id3_sync_safe_to_int})
+    raw, id3_header = read_bits_to_namedtuple(fr, fmt, Id3v2Header, {10: id3_sync_safe_to_int})
 
     # If the 0x10 bit of byte 5 is set, let OFFSET = OFFSET + 10 (for the footer).
 
@@ -435,7 +480,7 @@ def read_id3v2(fr: IO[bytes], parse: bool = False) -> Tuple[int, Id3v2Header]:
         # return pos, id3_header, Id3v2Fields._make()
 
     else:
-        fr.seek(id3_header.size, SEEK_CUR)
+        fr.seek(id3_header.size, os.SEEK_CUR)
         return pos, id3_header, None
 
 
@@ -461,13 +506,13 @@ def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[I
         if comment[-1] != zero and comment[-2] == zero:
             comment = comment[:-2].rstrip(zero)
             track = comment[-1]
-            return pos, Id3v11Fields._make(song_title, artist, album, year, comment, track, genre)
+            return pos, Id3v11Fields._make((song_title, artist, album, year, comment, track, genre))
         else:
             comment = comment.rstrip(zero)
-            return pos, Id3v1Fields._make(song_title, artist, album, year, comment, genre)
+            return pos, Id3v1Fields._make((song_title, artist, album, year, comment, genre))
 
     else:
-        fr.seek(125, SEEK_CUR)
+        fr.seek(125, os.SEEK_CUR)
         return pos, None
 
 
@@ -482,11 +527,11 @@ def read_apev2(fr: IO[bytes]) -> Tuple[int, APEv2Header]:
     header = APEv2Header._make(funpack(fr, "<LLL4sQ"))
     assert header.version in (1000, 2000)
     print(header)
-    fr.seek(header.size, SEEK_CUR)
+    fr.seek(header.size, os.SEEK_CUR)
     return pos, header
 
 
-def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
+def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, str]:
     # see <https://id3.org/Lyrics3>
     # see <http://id3lib.sourceforge.net/id3/lyrics3.html>
 
@@ -527,7 +572,7 @@ def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
             if tag == b"LYRICS200":
                 break
             else:
-                fr.seek(-15, SEEK_CUR)
+                fr.seek(-15, os.SEEK_CUR)
 
             field_id_, size_ = funpack(fr, "3s6s")
             field_id = field_id_.decode("ascii")
@@ -536,7 +581,7 @@ def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
 
             size = int(size_)
             information = read_or_raise(fr, size).decode("iso-8859-1")
-            tag[field_id] = information  # fixme: duplicated fields are overwritten. what's the spec here?
+            tags[field_id] = information  # fixme: duplicated fields are overwritten. what's the spec here?
 
     except Exception:
         raise RuntimeError("Invalid Lyrics v2 tag")
@@ -544,16 +589,35 @@ def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
     return pos, tags
 
 
-def read_mp3(path):
+FramesOrTags = Union[MpegAudioFrame, Id3v2Tag]
+
+
+class NoTagsFound(Exception):
+    pass
+
+
+def read_tags(fr):
+    for func in [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]:
+        try:
+            return None, func(fr)
+        except WrongSignature:
+            pass
+
+    raise NoTagsFound()
+
+
+def read_mp3(
+    path: PathType, content: bool = False, verify: bool = False
+) -> Iterator[Tuple[Optional[bytes], FramesOrTags]]:
     with open(path, "rb") as fr:
         try:
-            yield read_id3v2(fr)
-        except RuntimeError:
+            yield None, read_id3v2(fr)
+        except (WrongSignature, RuntimeError):
             fr.seek(0)
 
         while True:
             try:
-                frame = read_frame(fr)
+                frame = read_frame(fr, content, verify)
                 if frame is None:
                     break
                 else:
@@ -561,51 +625,87 @@ def read_mp3(path):
             except OutOfSync as e:
                 fr.seek(e.pos)
 
-                for func in [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]:
-                    try:
-                        yield func(fr)
-                        continue
-                    except WrongSignature:
-                        pass
-                    except Empty:
-                        return
+                try:
+                    yield read_tags(fr)
+                except Empty:
+                    return
+                except NoTagsFound:
+                    first_8_bytes = fr.read(8)
+                    if e.pos == 0:
+                        raise MaybeNotMp3(f"File doesn't start with a valid frame: {first_8_bytes!r}")
+                    else:
+                        raise InvalidFrame(f"Invalid frame found in file at pos {e.pos}: {first_8_bytes!r}")
 
-                first_8_bytes = fr.read(8)
 
-                if e.pos == 0:
-                    raise MaybeNotMp3(f"File doesn't start with a valid frame: {first_8_bytes}")
-                else:
-                    raise InvalidFrame(f"Invalid frame found in file: {first_8_bytes}")
+def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
+    with open(out_path, "wb") as fw:
+        try:
+            for raw, frame in read_mp3(in_path, content=True, verify=True):
+                assert isinstance(raw, bytes), type(raw)
+                assert isinstance(frame, MpegAudioFrame), type(frame)
+                fw.write(raw)
+        except InvalidFrame:
+            print("stopped at invalid frame")
 
 
 if __name__ == "__main__":
     import sys
     from argparse import ArgumentParser
-    from os import fspath
+    from pathlib import Path
 
     from genutility.args import is_dir
     from genutility.filesystem import scandir_ext
-    from genutility.iter import list_except, progress
+    from genutility.iter import list_except
+    from rich.progress import Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
 
     parser = ArgumentParser()
     parser.add_argument("path", type=is_dir)
+    parser.add_argument("--action", choices=("read", "copy"), required=True)
+    parser.add_argument("--copy-suffix", default=".copy")
     args = parser.parse_args()
 
     total_count = 0
     errors_count = 0
 
-    def progress_callback(total, length):
-        return f"{errors_count} failed ({errors_count*100/total:.2f}%)"
+    progress = Progress(
+        TextColumn("{task.completed}{task.description}"),
+        TaskProgressColumn(show_speed=True),
+        TimeElapsedColumn(),
+        refresh_per_second=1,
+    )
+    with progress:
+        for path in progress.track(
+            scandir_ext(args.path, {".mp3", ".mp2"}), description=" files scanned"
+        ):  # , extra_info_callback=progress_callback
+            total_count += 1
+            task_id = progress.add_task(" frames processed", total=None)
 
-    for path in progress(scandir_ext(args.path, {".mp3"}), extra_info_callback=progress_callback):
-        total_count += 1
+            if args.action == "read":
+                exc, res = list_except(progress.track(read_mp3(path, True, True), task_id=task_id))
+                if exc:
+                    for i in res[:1] + res[-2:]:
+                        print(*i, file=sys.stderr)
+                    logging.exception("Enumerating frames of <%s> failed", os.fspath(path), exc_info=exc)
+                    errors_count += 1
+                    print("-----")
+            elif args.action == "copy":
+                p = Path(path)
+                suffix = f"{args.copy_suffix}{p.suffix}"
+                if p.name.endswith(suffix):
+                    print("skipping copy file")
+                    continue
 
-        exc, res = list_except(read_mp3(path))
-        if exc:
-            for i in res[:1] + res[-2:]:
-                print(*i, file=sys.stderr)
-            logging.exception("Enumerating frames of <%s> failed", fspath(path), exc_info=exc)
-            errors_count += 1
-            print("-----")
+                outpath = p.with_suffix(suffix)
+                if outpath.exists():
+                    print("skipping already copied file")
+                    continue
+
+                try:
+                    copy_mpeg_audio(path, outpath)
+                except Exception:
+                    logging.exception("Copying frames of <%s> failed", os.fspath(path), exc_info=exc)
+                    errors_count += 1
+
+            progress.remove_task(task_id)
 
     print(f"{errors_count}/{total_count} files failed to parse")
