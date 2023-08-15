@@ -4,12 +4,11 @@ import sqlite3
 from os import PathLike, fspath, stat
 from typing import Dict, Iterator, Optional, Tuple
 
+from genutility.filesdb import is_signed_int_64, unsigned_to_signed_int_64
 from genutility.filesystem import scandir_rec
 from genutility.sql import CursorContext
 from genutility.sqlite import to_uri
 from genutility.typing import Connection
-
-from .utils import is_signed_int_64, unsigned_to_signed_int_64
 
 FileID = Tuple[int, int]
 FilesDict = Dict[FileID, Tuple[str, str, int, int]]

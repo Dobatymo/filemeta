@@ -3,7 +3,7 @@ import os
 import struct
 from collections import namedtuple
 from enum import IntEnum
-from typing import IO, Callable, Dict, Iterable, Iterator, List, Optional, Tuple, Type, Union
+from typing import IO, Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
 
 import bitstruct
 from fastcrc import crc16
@@ -13,6 +13,7 @@ from genutility.file import Empty, read_or_raise
 logger = logging.getLogger(__name__)
 
 PathType = Union[str, os.PathLike]
+T_nt = TypeVar("T_nt", bound=NamedTuple)
 
 # general exceptions
 
@@ -49,8 +50,8 @@ def funpack(fr: IO[bytes], fmt: str) -> tuple:
 
 
 def read_bytes_to_namedtuple(
-    fr: IO[bytes], fmt: str, namedtuplecls: Type[namedtuple], conv: Optional[Dict[int, Callable]] = None
-) -> namedtuple:
+    fr: IO[bytes], fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
+) -> T_nt:
     fields = funpack(fr, fmt)
 
     if conv:
@@ -70,8 +71,8 @@ def fbitunpack(fr: IO[bytes], fmt: str) -> Tuple[bytes, tuple]:
 
 
 def read_bits_to_namedtuple(
-    fr: IO[bytes], fmt: str, namedtuplecls: Type[namedtuple], conv: Optional[Dict[int, Callable]] = None
-) -> Tuple[bytes, namedtuple]:
+    fr: IO[bytes], fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
+) -> Tuple[bytes, T_nt]:
     raw, fields = fbitunpack(fr, fmt)
 
     if conv:
@@ -130,8 +131,25 @@ Id3v2Header = namedtuple(
 )
 APEv2Header = namedtuple("APEv2Header", ["version", "size", "item_count", "flags", "reserved"])
 
-Id3v1Fields = namedtuple("Id3v1Fields", ["song_title", "artist", "album", "year", "comment", "genre"])
-Id3v11Fields = namedtuple("Id3v11Fields", ["song_title", "artist", "album", "year", "comment", "track", "genre"])
+
+class Id3v1Fields(NamedTuple):
+    song_title: bytes
+    artist: bytes
+    album: bytes
+    year: bytes
+    comment: bytes
+    genre: int
+
+
+class Id3v11Fields(NamedTuple):
+    song_title: bytes
+    artist: bytes
+    album: bytes
+    year: bytes
+    comment: bytes
+    track: int
+    genre: int
+
 
 # enums
 
@@ -372,7 +390,7 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInfor
             )
             delta += 6
 
-    side_information_tuple = (
+    side_information = Mp3SideInformation(
         main_data_begin,
         private_bits,
         scfsi,
@@ -392,7 +410,7 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInfor
         count1table_select,
     )
 
-    return data, Mp3SideInformation._make(side_information_tuple)
+    return data, side_information
 
 
 class IntegrityCheckFailed(Exception):
@@ -417,7 +435,7 @@ def read_frame(
         raw_header, header = fbitunpack(fr, HEADER_FMT)
         raw.append(raw_header)
     except Empty:  # end of file
-        return
+        return None
 
     header = Mp3Header._make(header)
 
@@ -456,8 +474,7 @@ def read_frame(
         raw_out = None
         fr.seek(pos + frame_length, os.SEEK_SET)
 
-    parsed = pos, header, crc, sideinfo
-    return raw_out, MpegAudioFrame._make(parsed)
+    return raw_out, MpegAudioFrame(pos, header, crc, sideinfo)
 
 
 Id3v2Fields = tuple
@@ -506,10 +523,10 @@ def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[I
         if comment[-1] != zero and comment[-2] == zero:
             comment = comment[:-2].rstrip(zero)
             track = comment[-1]
-            return pos, Id3v11Fields._make((song_title, artist, album, year, comment, track, genre))
+            return pos, Id3v11Fields(song_title, artist, album, year, comment, track, genre)
         else:
             comment = comment.rstrip(zero)
-            return pos, Id3v1Fields._make((song_title, artist, album, year, comment, genre))
+            return pos, Id3v1Fields(song_title, artist, album, year, comment, genre)
 
     else:
         fr.seek(125, os.SEEK_CUR)
@@ -654,9 +671,11 @@ if __name__ == "__main__":
     from pathlib import Path
 
     from genutility.args import is_dir
-    from genutility.filesystem import scandir_ext
+    from genutility.filesystem import scandir_error_log_warning, scandir_ext
     from genutility.iter import list_except
-    from rich.progress import Progress, TaskProgressColumn, TextColumn, TimeElapsedColumn
+    from genutility.rich import Progress
+    from rich.progress import Progress as RichProgress
+    from rich.progress import TaskProgressColumn, TextColumn, TimeElapsedColumn
 
     parser = ArgumentParser()
     parser.add_argument("path", type=is_dir)
@@ -667,35 +686,35 @@ if __name__ == "__main__":
     total_count = 0
     errors_count = 0
 
-    progress = Progress(
+    progress = RichProgress(
         TextColumn("{task.completed}{task.description}"),
         TaskProgressColumn(show_speed=True),
         TimeElapsedColumn(),
         refresh_per_second=1,
     )
     with progress:
-        for path in progress.track(
-            scandir_ext(args.path, {".mp3", ".mp2"}), description=" files scanned"
-        ):  # , extra_info_callback=progress_callback
+        p = Progress(progress)
+        for entry in p.track(
+            scandir_ext(args.path, {".mp3", ".mp2"}, errorfunc=scandir_error_log_warning), description=" files scanned"
+        ):
             total_count += 1
-            task_id = progress.add_task(" frames processed", total=None)
 
             if args.action == "read":
-                exc, res = list_except(progress.track(read_mp3(path, True, True), task_id=task_id))
+                exc, res = list_except(p.track(read_mp3(entry, True, True), description=" frames processed"))
                 if exc:
                     for i in res[:1] + res[-2:]:
                         print(*i, file=sys.stderr)
-                    logging.exception("Enumerating frames of <%s> failed", os.fspath(path), exc_info=exc)
+                    logging.exception("Enumerating frames of <%s> failed", os.fspath(entry), exc_info=exc)
                     errors_count += 1
                     print("-----")
             elif args.action == "copy":
-                p = Path(path)
-                suffix = f"{args.copy_suffix}{p.suffix}"
-                if p.name.endswith(suffix):
+                path = Path(entry)
+                suffix = f"{args.copy_suffix}{path.suffix}"
+                if path.name.endswith(suffix):
                     print("skipping copy file")
                     continue
 
-                outpath = p.with_suffix(suffix)
+                outpath = path.with_suffix(suffix)
                 if outpath.exists():
                     print("skipping already copied file")
                     continue
@@ -705,7 +724,5 @@ if __name__ == "__main__":
                 except Exception:
                     logging.exception("Copying frames of <%s> failed", os.fspath(path), exc_info=exc)
                     errors_count += 1
-
-            progress.remove_task(task_id)
 
     print(f"{errors_count}/{total_count} files failed to parse")

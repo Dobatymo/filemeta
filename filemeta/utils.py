@@ -37,18 +37,6 @@ def print(*msg, end="\x1b[0K\n", **kwargs):
     _print(*msg, end=end, **kwargs)
 
 
-def is_signed_int_64(num: int) -> bool:
-    return -(2**63) <= num <= 2**63 - 1
-
-
-def unsigned_to_signed_int_64(num: int) -> int:
-    return num - 2**63
-
-
-def signed_to_unsigned_int_64(num: int) -> int:
-    return num + 2**63
-
-
 def get_url_fp(path: str, mode: str, encoding: Optional[str]) -> Union[GzipFile, IO]:
     if "w" in mode:
         raise ValueError("Cannot write mode for URLs")
