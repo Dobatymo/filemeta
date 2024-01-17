@@ -667,7 +667,7 @@ def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
 
 if __name__ == "__main__":
     import sys
-    from argparse import ArgumentParser
+    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
     from pathlib import Path
 
     from genutility.args import is_dir
@@ -677,10 +677,10 @@ if __name__ == "__main__":
     from rich.progress import Progress as RichProgress
     from rich.progress import TaskProgressColumn, TextColumn, TimeElapsedColumn
 
-    parser = ArgumentParser()
+    parser = ArgumentParser(formatter_class=ArgumentDefaultsHelpFormatter)
     parser.add_argument("path", type=is_dir)
     parser.add_argument("--action", choices=("read", "copy"), required=True)
-    parser.add_argument("--copy-suffix", default=".copy")
+    parser.add_argument("--copy-suffix", default=".copy", help="suffix to add when copying files")
     args = parser.parse_args()
 
     total_count = 0
@@ -721,8 +721,8 @@ if __name__ == "__main__":
 
                 try:
                     copy_mpeg_audio(path, outpath)
-                except Exception:
-                    logging.exception("Copying frames of <%s> failed", os.fspath(path), exc_info=exc)
+                except Exception as e:
+                    logging.exception("Copying frames of <%s> failed", os.fspath(path), exc_info=e)
                     errors_count += 1
 
     print(f"{errors_count}/{total_count} files failed to parse")
