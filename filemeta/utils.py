@@ -1,40 +1,36 @@
 import platform
 import warnings
-from builtins import print as _print
 from gzip import GzipFile
 from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
-from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Protocol, TypeVar, Union, cast
+from typing import IO, Any, Callable, Dict, Iterable, List, Optional, TypeVar, Union, cast
 
 import requests
 from genutility.file import _check_arguments
+from typing_extensions import Protocol
 
 T = TypeVar("T")
 
 
 class HashableLessThan(Protocol):
-    def __lt__(self, __other: Any) -> bool:
-        ...
+    def __lt__(self, __other: Any) -> bool: ...
 
-    def __hash__(self) -> int:
-        ...
+    def __hash__(self) -> int: ...
 
 
-DEFAULT_DB_PATH = f"{platform.node()}-catalog.db"
+DEFAULT_DB_NAME = f"{platform.node()}-catalog.db"
 DEFAULT_TIMEOUT = 60
 
 
 def get_all_drives_windows() -> List[Path]:
-    return [drive for driveletter in ascii_uppercase if (drive := Path(driveletter + ":\\")).is_dir()]
-
-
-def print(*msg, end="\x1b[0K\n", **kwargs):
-    """Same as `print` but it clears the reminder of the line.
-    Requires ANSI escapes either though a supporting terminal or `colorama`.
-    """
-
-    _print(*msg, end=end, **kwargs)
+    # replace with os.listdrives() for python 3.12+
+    out: List[Path] = []
+    for driveletter in ascii_uppercase:
+        drive = Path(driveletter + ":\\")
+        if drive.is_dir():
+            out.append(drive)
+    return out
 
 
 def get_url_fp(path: str, mode: str, encoding: Optional[str]) -> Union[GzipFile, IO]:
@@ -106,7 +102,7 @@ def iterable_to_dict_by_key(
             else:
                 key = apply(getattr(props, by))
             if key in ret:
-                warnings.warn("Ignoring duplicated entries")
+                warnings.warn("Ignoring duplicated entries", stacklevel=2)
             ret[key] = props
         return ret
     else:

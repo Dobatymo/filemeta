@@ -324,7 +324,7 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInfor
         main_data_begin, private_bits, scfsi = bitstruct.unpack_from(SIDE_INFORMATION_SINGLE_FMT_1, data, delta)
         delta += 18
 
-        for i in range(2):
+        for _i in range(2):
             par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
                 SIDE_INFORMATION_SINGLE_FMT_2, data, delta
             )
@@ -366,7 +366,7 @@ def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInfor
         main_data_begin, private_bits, scfsi = bitstruct.unpack_from(SIDE_INFORMATION_NONSINGLE_FMT_1, data, delta)
         delta += 20
 
-        for i in range(2):
+        for _i in range(2):
             par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
                 SIDE_INFORMATION_NONSINGLE_FMT_2, data, delta
             )
@@ -667,7 +667,7 @@ def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
 
 if __name__ == "__main__":
     import sys
-    from argparse import ArgumentParser, ArgumentDefaultsHelpFormatter
+    from argparse import ArgumentDefaultsHelpFormatter, ArgumentParser
     from pathlib import Path
 
     from genutility.args import is_dir

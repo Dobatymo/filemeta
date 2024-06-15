@@ -1,13 +1,19 @@
 [build-system]
-requires = ["setuptools", "wheel"]
 build-backend = "setuptools.build_meta"
+
+requires = [
+  "setuptools",
+  "wheel",
+]
 
 [tool.black]
 line-length = 120
 
+[tool.ruff]
+line-length = 120
+
 [tool.isort]
 profile = "black"
-src_paths = ["."]
 line_length = 120
 
 [tool.mypy]
@@ -22,4 +28,6 @@ warn_return_any = true
 strict_equality = true
 
 [tool.bandit]
-skips = ["B101"]
+skips = [
+  "B101",
+]

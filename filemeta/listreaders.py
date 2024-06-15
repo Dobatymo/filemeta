@@ -62,7 +62,7 @@ def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] 
     skip_formats = {"Metadata", "Archive BitTorrent", "Item Tile"}
 
     with OpenFileOrUrl(path) as fr:
-        for event, element in iterparse(fr, ["end"]):  # nosec
+        for _event, element in iterparse(fr, ["end"]):  # nosec
             if element.tag != "file":
                 continue
             if element.get("source") != "original":
@@ -86,7 +86,7 @@ def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = N
     }.get(hashfunc, hashfunc)
 
     with open(path) as fr:
-        for event, element in iterparse(fr, ["end"]):  # nosec
+        for _event, element in iterparse(fr, ["end"]):  # nosec
             if element.tag != "game":
                 continue
 
