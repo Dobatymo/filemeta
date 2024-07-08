@@ -3,12 +3,12 @@ import os
 import struct
 from collections import namedtuple
 from enum import IntEnum
-from typing import IO, Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
+from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
 
 import bitstruct
 from fastcrc import crc16
 from genutility.exceptions import ParseError
-from genutility.file import Empty, read_or_raise
+from genutility.file import Empty, read_or_raise, PathType, BufferedBinaryIoT
 
 logger = logging.getLogger(__name__)
 
@@ -25,7 +25,7 @@ class WrongSignature(ParseError):
 # helpers
 
 
-def read_until(fr: IO[bytes], delimiter: bytes) -> bytes:
+def read_until(fr: BufferedBinaryIoT, delimiter: bytes) -> bytes:
     ret: List[int] = []
     delim = list(delimiter)
     delim_len = len(delimiter)
@@ -44,13 +44,13 @@ def transform_iterable(it: Iterable, conv: Dict[int, Callable]) -> list:
     return fields
 
 
-def funpack(fr: IO[bytes], fmt: str) -> tuple:
+def funpack(fr: BufferedBinaryIoT, fmt: str) -> tuple:
     num_bytes = struct.calcsize(fmt)
     return struct.unpack(fmt, read_or_raise(fr, num_bytes))
 
 
 def read_bytes_to_namedtuple(
-    fr: IO[bytes], fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
+    fr: BufferedBinaryIoT, fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
 ) -> T_nt:
     fields = funpack(fr, fmt)
 
@@ -60,7 +60,7 @@ def read_bytes_to_namedtuple(
     return namedtuplecls._make(fields)
 
 
-def fbitunpack(fr: IO[bytes], fmt: str) -> Tuple[bytes, tuple]:
+def fbitunpack(fr: BufferedBinaryIoT, fmt: str) -> Tuple[bytes, tuple]:
     num_bits = bitstruct.calcsize(fmt)
     num_bytes, remainder = divmod(num_bits, 8)
     assert remainder == 0
@@ -71,7 +71,7 @@ def fbitunpack(fr: IO[bytes], fmt: str) -> Tuple[bytes, tuple]:
 
 
 def read_bits_to_namedtuple(
-    fr: IO[bytes], fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
+    fr: BufferedBinaryIoT, fmt: str, namedtuplecls: Type[T_nt], conv: Optional[Dict[int, Callable]] = None
 ) -> Tuple[bytes, T_nt]:
     raw, fields = fbitunpack(fr, fmt)
 
@@ -305,7 +305,7 @@ def get_frame_length(header: Mp3Header) -> int:
     return int(144 * bitrate * 1000 / samplerate + header.padding)
 
 
-def read_sideinfo(fr: IO[bytes], header: Mp3Header) -> Tuple[bytes, Mp3SideInformation]:
+def read_sideinfo(fr: BufferedBinaryIoT, header: Mp3Header) -> Tuple[bytes, Mp3SideInformation]:
     single_channel = header.mode == Mode.SINGLE_CHANNEL
 
     if single_channel:
@@ -421,7 +421,7 @@ MpegAudioFrame = namedtuple("MpegAudioFrame", ["pos", "header", "crc", "sideinfo
 
 
 def read_frame(
-    fr: IO[bytes], content: bool = False, verify: bool = False
+    fr: BufferedBinaryIoT, content: bool = False, verify: bool = False
 ) -> Optional[Tuple[Optional[bytes], MpegAudioFrame]]:
     HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
 
@@ -481,7 +481,7 @@ Id3v2Fields = tuple
 Id3v2Tag = Tuple[int, Id3v2Header, Optional[Id3v2Fields]]
 
 
-def read_id3v2(fr: IO[bytes], parse: bool = False) -> Id3v2Tag:
+def read_id3v2(fr: BufferedBinaryIoT, parse: bool = False) -> Id3v2Tag:
     pos = fr.tell()
 
     if fr.read(3) != b"ID3":
@@ -501,7 +501,7 @@ def read_id3v2(fr: IO[bytes], parse: bool = False) -> Id3v2Tag:
         return pos, id3_header, None
 
 
-def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[Id3v1Fields, Id3v11Fields]]]:
+def read_id3v1(fr: BufferedBinaryIoT, parse: bool = True) -> Tuple[int, Optional[Union[Id3v1Fields, Id3v11Fields]]]:
     # see <http://id3lib.sourceforge.net/id3/id3v1.html>
 
     pos = fr.tell()
@@ -533,7 +533,7 @@ def read_id3v1(fr: IO[bytes], parse: bool = True) -> Tuple[int, Optional[Union[I
         return pos, None
 
 
-def read_apev2(fr: IO[bytes]) -> Tuple[int, APEv2Header]:
+def read_apev2(fr: BufferedBinaryIoT) -> Tuple[int, APEv2Header]:
     pos = fr.tell()
     tag = read_or_raise(fr, 8)
 
@@ -548,7 +548,7 @@ def read_apev2(fr: IO[bytes]) -> Tuple[int, APEv2Header]:
     return pos, header
 
 
-def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, str]:
+def read_lyrics3v1(fr: BufferedBinaryIoT) -> Tuple[int, str]:
     # see <https://id3.org/Lyrics3>
     # see <http://id3lib.sourceforge.net/id3/lyrics3.html>
 
@@ -567,7 +567,7 @@ def read_lyrics3v1(fr: IO[bytes]) -> Tuple[int, str]:
     return pos, lyrics
 
 
-def read_lyrics3v2(fr: IO[bytes]) -> Tuple[int, Dict[str, str]]:
+def read_lyrics3v2(fr: BufferedBinaryIoT) -> Tuple[int, Dict[str, str]]:
     # see <https://id3.org/Lyrics3v2>
     # see <http://id3lib.sourceforge.net/id3/lyrics3200.html>
 
@@ -613,7 +613,7 @@ class NoTagsFound(Exception):
     pass
 
 
-def read_tags(fr):
+def read_tags(fr: BufferedBinaryIoT):
     for func in [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]:
         try:
             return None, func(fr)
@@ -660,7 +660,7 @@ def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
             for raw, frame in read_mp3(in_path, content=True, verify=True):
                 assert isinstance(raw, bytes), type(raw)
                 assert isinstance(frame, MpegAudioFrame), type(frame)
-                fw.write(raw)
+                fw.write(raw)  # buffered
         except InvalidFrame:
             print("stopped at invalid frame")
 
