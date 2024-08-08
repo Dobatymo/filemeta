@@ -8,11 +8,10 @@ from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optiona
 import bitstruct
 from fastcrc import crc16
 from genutility.exceptions import ParseError
-from genutility.file import Empty, read_or_raise, PathType, BufferedBinaryIoT
+from genutility.file import BufferedBinaryIoT, Empty, PathType, read_or_raise
 
 logger = logging.getLogger(__name__)
 
-PathType = Union[str, os.PathLike]
 T_nt = TypeVar("T_nt", bound=NamedTuple)
 
 # general exceptions
