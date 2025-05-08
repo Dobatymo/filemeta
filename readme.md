@@ -4,4 +4,4 @@ Some helper functions to parse file meta data from files about themselves (like 
 
 ## Requirements
 
-Python 3.7+.
+Python 3.8+.

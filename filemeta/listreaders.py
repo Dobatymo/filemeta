@@ -170,7 +170,7 @@ def iter_rar(
 def iter_archive(
     archivefile: str,
     topleveldir: Optional[str] = None,
-    hashfunc: str = "crc32",
+    hashfunc: Optional[str] = "crc32",
     hash_from_meta: bool = True,
 ) -> Iterator[FileProperties]:
     if archivefile.endswith(".zip"):
