@@ -38,7 +38,10 @@ dependencies = [
   "requests",
   "typing-extensions>=4",
 ]
-
+optional-dependencies.heic = [
+  "pi-heif",
+  "pillow",
+]
 urls.Home = "https://github.com/Dobatymo/filemeta"
 
 [tool.setuptools]

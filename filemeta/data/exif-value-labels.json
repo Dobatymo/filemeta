@@ -128,6 +128,9 @@
         "2": "Portrait",
         "3": "Night scene"
     },
+    "SceneType": {
+        "1": "Directly photographed"
+    },
     "SensingMethod": {
         "1": "Not defined",
         "2": "One-chip color area sensor",

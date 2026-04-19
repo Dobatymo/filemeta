@@ -42,15 +42,33 @@ def decode_ascii(value: bytes, encoding: str) -> Union[str, Tuple[str, ...]]:
         return tuple(elm.decode(encoding) for elm in value.split(b"\0"))
 
 
+def piexif_load(path_or_data):
+    try:
+        return piexif.load(path_or_data)
+    except ValueError as e:
+        if e.args and e.args[0] == "doesnot have exif":
+            return None
+        raise
+
+
 def exif_table(path: str, encoding: str = "utf-8") -> Iterator[Tuple[str, str, str, Any, str]]:
     # see Exif Version 2.2 docs
 
-    try:
-        exif = piexif.load(path)
-    except ValueError as e:
-        if e.args and e.args[0] == "doesnot have exif":
-            return
-        raise
+    if path.lower().endswith(".heic"):
+        from pi_heif import register_heif_opener
+        from PIL import Image
+
+        register_heif_opener()
+
+        with Image.open(path) as img:
+            img.load()
+            if "exif" in img.info:
+                exif = piexif_load(img.info["exif"])
+    else:
+        exif = piexif_load(path)
+
+    if exif is None:
+        return
 
     for ifd in ("0th", "Exif", "GPS", "1st"):
         for tag in exif[ifd]:
