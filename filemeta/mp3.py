@@ -344,6 +344,9 @@ def validate_header(header: Mp3Header) -> None:
         get_frame_length(header)
 
 
+MPEG_AUDIO_HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
+
+
 def _read_frame_header(fr: BufferedBinaryIoT) -> Tuple[int, bytes, Mp3Header]:
     pos = fr.tell()
     raw_header, header = read_bits_to_namedtuple(
@@ -361,6 +364,41 @@ def _read_frame_header(fr: BufferedBinaryIoT) -> Tuple[int, bytes, Mp3Header]:
     return pos, raw_header, header
 
 
+def _free_format_headers_match(first: Mp3Header, candidate: Mp3Header) -> bool:
+    return bool(
+        candidate.sync == 2047
+        and candidate.bitrate == 0
+        and candidate.id == first.id
+        and candidate.layer == first.layer
+        and candidate.frequency == first.frequency
+        and candidate.mode == first.mode
+        and candidate.mode_extension == first.mode_extension
+    )
+
+
+def _get_free_format_frame_length(fr: BufferedBinaryIoT, pos: int, header: Mp3Header) -> int:
+    """Infer a free-format frame size from the next matching frame header."""
+
+    body_start = fr.tell()
+    fr.seek(body_start, os.SEEK_SET)
+
+    try:
+        while True:
+            candidate_pos = fr.tell()
+            raw_candidate = fr.read(4)
+            if len(raw_candidate) < 4:
+                fr.seek(0, os.SEEK_END)
+                return fr.tell() - pos
+
+            candidate = Mp3Header._make(bitstruct.unpack(MPEG_AUDIO_HEADER_FMT, raw_candidate))
+            if _free_format_headers_match(header, candidate):
+                return candidate_pos - pos
+
+            fr.seek(candidate_pos + 1, os.SEEK_SET)
+    finally:
+        fr.seek(body_start, os.SEEK_SET)
+
+
 def _get_frame_length_for_frame(fr: BufferedBinaryIoT, pos: int, header: Mp3Header) -> int:
     if header.bitrate:
         return get_frame_length(header)
@@ -370,6 +408,16 @@ def _get_frame_length_for_frame(fr: BufferedBinaryIoT, pos: int, header: Mp3Head
 def _validate_frame_end(fr: BufferedBinaryIoT, pos: int, frame_length: int) -> None:
     fr.seek(pos + frame_length - 1, os.SEEK_SET)
     read_or_raise(fr, 1)
+
+
+def _read_bits(data: bytes, offset: int, size: int) -> Tuple[int, int]:
+    if offset < 0 or size < 0 or offset + size > len(data) * 8:
+        raise EOFError("Not enough frame bits")
+
+    value = 0
+    for index in range(offset, offset + size):
+        value = value << 1 | ((data[index // 8] >> (7 - index % 8)) & 1)
+    return value, offset + size
 
 
 def read_sideinfo(fr: BufferedBinaryIoT, header: Mp3Header) -> Tuple[bytes, Mp3SideInformation]:
@@ -545,9 +593,6 @@ class MpegAudioFrame(NamedTuple):
     header: Mp3Header
     crc: Optional[int]
     sideinfo: FrameSideInformation
-
-
-MPEG_AUDIO_HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
 _MPEG_AUDIO_CRC16 = CRC(16, 0x8005, 0xFFFF, False, False, 0)
 
 _LAYER2_ALLOCATION_BITS = (
@@ -598,16 +643,6 @@ _LAYER2_TABLES = (
         (0, 3, 3, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
     ),
 )
-
-
-def _read_bits(data: bytes, offset: int, size: int) -> Tuple[int, int]:
-    if offset < 0 or size < 0 or offset + size > len(data) * 8:
-        raise EOFError("Not enough frame bits")
-
-    value = 0
-    for index in range(offset, offset + size):
-        value = value << 1 | ((data[index // 8] >> (7 - index % 8)) & 1)
-    return value, offset + size
 
 
 def _layer1_layout(header: Mp3Header) -> Tuple[int, int]:
@@ -957,41 +992,6 @@ def _read_mpeg2_layer2_crc_data(fr: BufferedBinaryIoT, header: Mp3Header) -> Tup
                 _, offset = _read_bits(data, offset, 2)
 
     return data, offset
-
-
-def _free_format_headers_match(first: Mp3Header, candidate: Mp3Header) -> bool:
-    return bool(
-        candidate.sync == 2047
-        and candidate.bitrate == 0
-        and candidate.id == first.id
-        and candidate.layer == first.layer
-        and candidate.frequency == first.frequency
-        and candidate.mode == first.mode
-        and candidate.mode_extension == first.mode_extension
-    )
-
-
-def _get_free_format_frame_length(fr: BufferedBinaryIoT, pos: int, header: Mp3Header) -> int:
-    """Infer a free-format frame size from the next matching frame header."""
-
-    body_start = fr.tell()
-    fr.seek(body_start, os.SEEK_SET)
-
-    try:
-        while True:
-            candidate_pos = fr.tell()
-            raw_candidate = fr.read(4)
-            if len(raw_candidate) < 4:
-                fr.seek(0, os.SEEK_END)
-                return fr.tell() - pos
-
-            candidate = Mp3Header._make(bitstruct.unpack(MPEG_AUDIO_HEADER_FMT, raw_candidate))
-            if _free_format_headers_match(header, candidate):
-                return candidate_pos - pos
-
-            fr.seek(candidate_pos + 1, os.SEEK_SET)
-    finally:
-        fr.seek(body_start, os.SEEK_SET)
 
 
 def read_frame(

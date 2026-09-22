@@ -5,7 +5,7 @@ All methods here return `Iterator[FileProperties]`
 import os.path
 from datetime import datetime, timezone
 from typing import Iterator, Optional
-from xml.etree.ElementTree import iterparse  # nosec
+from xml.etree.ElementTree import iterparse
 from zipfile import ZipFile
 
 from genutility.datetime import datetime_from_utc_timestamp, datetime_from_utc_timestamp_ns
@@ -13,88 +13,6 @@ from genutility.filesystem import FileProperties, scandir_rec
 from genutility.hash import hash_filelike
 
 from .utils import OpenFileOrUrl
-
-
-def iter_dir(
-    path: str,
-    extra: bool = True,
-    hashfunc: Optional[str] = None,
-    dirs: bool = True,
-    recurse_archives: bool = False,
-    hash_from_meta: bool = True,
-) -> Iterator[FileProperties]:
-    """Returns correct device id and file inode for py > 3.5 on windows if `extras=True`"""
-
-    for entry in scandir_rec(path, files=True, dirs=dirs, relative=True):
-        relpath = entry.relpath.replace("\\", "/")
-        abspath = entry.path
-
-        if recurse_archives:
-            try:
-                for prop in iter_archive(entry.path, hashfunc=hashfunc, hash_from_meta=hash_from_meta):
-                    prop.relpath = f"{relpath}:/{prop.relpath}"
-                    prop.abspath = f"{abspath}:/{prop.relpath}"
-                    yield prop
-                continue
-            except ValueError:
-                pass
-
-        if extra:
-            stat = os.stat(entry.path)
-        else:
-            stat = entry.stat()
-
-        modtime = datetime_from_utc_timestamp_ns(stat.st_mtime_ns)
-
-        yield FileProperties(
-            relpath,
-            stat.st_size,
-            entry.is_dir(),
-            abspath,
-            (stat.st_dev, stat.st_ino),
-            modtime,
-        )
-
-
-def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
-    assert hashfunc in ("sha1", "md5", "crc32")
-
-    skip_formats = {"Metadata", "Archive BitTorrent", "Item Tile"}
-
-    with OpenFileOrUrl(path) as fr:
-        for _event, element in iterparse(fr, ["end"]):  # nosec
-            if element.tag != "file":
-                continue
-            if element.get("source") != "original":
-                continue
-            if element.find("format").text in skip_formats:
-                continue
-
-            relpath = element.get("name")
-            size = int(element.find("size").text)
-            modtime = datetime_from_utc_timestamp(int(element.find("mtime").text))
-            hash = element.find(hashfunc).text
-
-            yield FileProperties(relpath, size, False, modtime=modtime, hash=hash)
-
-
-def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
-    assert hashfunc in ("sha1", "md5", "crc32")
-
-    hashfunc = {
-        "crc32": "crc",
-    }.get(hashfunc, hashfunc)
-
-    with open(path) as fr:
-        for _event, element in iterparse(fr, ["end"]):  # nosec
-            if element.tag != "game":
-                continue
-
-            rom = element.find("rom")
-            relpath = rom.get("name")
-            size = int(rom.get("size"))
-            hash = rom.get(hashfunc)
-            yield FileProperties(relpath, size, False, hash=hash)
 
 
 def _archive_hash(af, f, hashfunc: Optional[str], hash_from_meta: bool):
@@ -180,6 +98,88 @@ def iter_archive(
     else:
         basename = os.path.basename(archivefile)
         raise ValueError(f"Unsupported archive format: {basename}")
+
+
+def iter_dir(
+    path: str,
+    extra: bool = True,
+    hashfunc: Optional[str] = None,
+    dirs: bool = True,
+    recurse_archives: bool = False,
+    hash_from_meta: bool = True,
+) -> Iterator[FileProperties]:
+    """Returns correct device id and file inode for py > 3.5 on windows if `extras=True`"""
+
+    for entry in scandir_rec(path, files=True, dirs=dirs, relative=True):
+        relpath = entry.relpath.replace("\\", "/")
+        abspath = entry.path
+
+        if recurse_archives:
+            try:
+                for prop in iter_archive(entry.path, hashfunc=hashfunc, hash_from_meta=hash_from_meta):
+                    prop.relpath = f"{relpath}:/{prop.relpath}"
+                    prop.abspath = f"{abspath}:/{prop.relpath}"
+                    yield prop
+                continue
+            except ValueError:
+                pass
+
+        if extra:
+            stat = os.stat(entry.path)
+        else:
+            stat = entry.stat()
+
+        modtime = datetime_from_utc_timestamp_ns(stat.st_mtime_ns)
+
+        yield FileProperties(
+            relpath,
+            stat.st_size,
+            entry.is_dir(),
+            abspath,
+            (stat.st_dev, stat.st_ino),
+            modtime,
+        )
+
+
+def iter_archiveorg_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
+    assert hashfunc in ("sha1", "md5", "crc32")
+
+    skip_formats = {"Metadata", "Archive BitTorrent", "Item Tile"}
+
+    with OpenFileOrUrl(path) as fr:
+        for _event, element in iterparse(fr, ["end"]):  # noqa: S314
+            if element.tag != "file":
+                continue
+            if element.get("source") != "original":
+                continue
+            if element.find("format").text in skip_formats:
+                continue
+
+            relpath = element.get("name")
+            size = int(element.find("size").text)
+            modtime = datetime_from_utc_timestamp(int(element.find("mtime").text))
+            hash = element.find(hashfunc).text
+
+            yield FileProperties(relpath, size, False, modtime=modtime, hash=hash)
+
+
+def iter_gamedat_xml(path: str, hashfunc: str = "sha1", dirs: Optional[bool] = None) -> Iterator[FileProperties]:
+    assert hashfunc in ("sha1", "md5", "crc32")
+
+    hashfunc = {
+        "crc32": "crc",
+    }.get(hashfunc, hashfunc)
+
+    with open(path) as fr:
+        for _event, element in iterparse(fr, ["end"]):  # noqa: S314
+            if element.tag != "game":
+                continue
+
+            rom = element.find("rom")
+            relpath = rom.get("name")
+            size = int(rom.get("size"))
+            hash = rom.get(hashfunc)
+            yield FileProperties(relpath, size, False, hash=hash)
 
 
 def iter_syncthing(

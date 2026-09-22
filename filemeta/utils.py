@@ -72,6 +72,9 @@ class OpenFileOrUrl:
         else:
             self.f = open(path, mode, encoding=encoding)
 
+    def close(self) -> None:
+        self.f.close()
+
     def __enter__(self) -> Union[GzipFile, IO]:
         return self.f
 
@@ -82,9 +85,6 @@ class OpenFileOrUrl:
         traceback: Optional[TracebackType],
     ) -> None:
         self.close()
-
-    def close(self) -> None:
-        self.f.close()
 
 
 def getattrnotnone(obj: Any, attr: str) -> Any:
