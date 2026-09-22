@@ -4,7 +4,8 @@ from gzip import GzipFile
 from io import TextIOWrapper
 from pathlib import Path
 from string import ascii_uppercase
-from typing import IO, Any, Callable, Dict, Iterable, List, Optional, TypeVar, Union, cast
+from types import TracebackType
+from typing import IO, Any, Callable, Dict, Iterable, List, Optional, Type, TypeVar, Union, cast
 
 import requests
 from genutility.file import _check_arguments
@@ -74,7 +75,12 @@ class OpenFileOrUrl:
     def __enter__(self) -> Union[GzipFile, IO]:
         return self.f
 
-    def __exit__(self, *args):
+    def __exit__(
+        self,
+        exc_type: Optional[Type[BaseException]],
+        exc_value: Optional[BaseException],
+        traceback: Optional[TracebackType],
+    ) -> None:
         self.close()
 
     def close(self) -> None:

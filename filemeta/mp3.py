@@ -1,12 +1,13 @@
 import logging
 import os
 import struct
-from collections import namedtuple
 from enum import IntEnum
+from io import BytesIO
 from typing import Callable, Dict, Iterable, Iterator, List, NamedTuple, Optional, Tuple, Type, TypeVar, Union
 
 import bitstruct
-from fastcrc import crc16
+from anycrc import CRC
+from bitarray import bitarray
 from genutility.exceptions import ParseError
 from genutility.file import BufferedBinaryIoT, Empty, PathType, read_or_raise
 
@@ -54,7 +55,7 @@ def read_bytes_to_namedtuple(
     fields = funpack(fr, fmt)
 
     if conv:
-        fields = transform_iterable(fields, conv)
+        fields = tuple(transform_iterable(fields, conv))
 
     return namedtuplecls._make(fields)
 
@@ -75,79 +76,10 @@ def read_bits_to_namedtuple(
     raw, fields = fbitunpack(fr, fmt)
 
     if conv:
-        fields = transform_iterable(fields, conv)
+        fields = tuple(transform_iterable(fields, conv))
 
     parsed = namedtuplecls._make(fields)
     return raw, parsed
-
-
-# named tuples
-
-Mp3Header = namedtuple(
-    "Mp3Header",
-    [
-        "sync",
-        "id",
-        "layer",
-        "protection",
-        "bitrate",
-        "frequency",
-        "padding",
-        "private",
-        "mode",
-        "mode_extension",
-        "copyright",
-        "home_original",
-        "emphasis",
-    ],
-)
-
-Mp3SideInformation = namedtuple(
-    "Mp3SideInformation",
-    [
-        "main_data_begin",
-        "private_bits",
-        "scfsi",
-        "par2_3_length",
-        "big_values",
-        "global_gain",
-        "scalefac_compress",
-        "windows_switching_flag",
-        "block_type",
-        "mixed_blockflag",
-        "table_select",
-        "subblock_gain",
-        "region0_count",
-        "region1_count",
-        "preflag",
-        "scalfac_scale",
-        "count1table_select",
-    ],
-)
-
-Id3v2Header = namedtuple(
-    "Id3v2Header", ["major_version", "revision_number", "a", "b", "c", "d", "e", "f", "g", "h", "size"]
-)
-APEv2Header = namedtuple("APEv2Header", ["version", "size", "item_count", "flags", "reserved"])
-
-
-class Id3v1Fields(NamedTuple):
-    song_title: bytes
-    artist: bytes
-    album: bytes
-    year: bytes
-    comment: bytes
-    genre: int
-
-
-class Id3v11Fields(NamedTuple):
-    song_title: bytes
-    artist: bytes
-    album: bytes
-    year: bytes
-    comment: bytes
-    track: int
-    genre: int
 
 
 # enums
@@ -174,6 +106,124 @@ class Mode(IntEnum):
     SINGLE_CHANNEL = 3
 
 
+# named tuples
+
+
+IntRows = Tuple[Tuple[int, ...], ...]
+OptionalIntRows = Tuple[Tuple[Optional[int], ...], ...]
+OptionalIntTupleRows = Tuple[Tuple[Optional[Tuple[int, ...]], ...], ...]
+ScalefactorRows = Tuple[Tuple[Optional[Tuple[int, int, int]], ...], ...]
+IntCube = Tuple[Tuple[Tuple[int, ...], ...], ...]
+Int4D = Tuple[Tuple[Tuple[Tuple[int, ...], ...], ...], ...]
+
+
+class Mp3Header(NamedTuple):
+    sync: int
+    id: ID
+    layer: Layer
+    protection: int
+    bitrate: int
+    frequency: int
+    padding: int
+    private: int
+    mode: Mode
+    mode_extension: int
+    copyright: int
+    home_original: int
+    emphasis: int
+
+
+class Mp3SideInformation(NamedTuple):
+    """Layer III side information, indexed as ``[granule][channel]``.
+
+    MPEG-1 has two granules and includes ``scfsi`` and ``preflag``. MPEG-2
+    and MPEG-2.5 have one granule and omit both fields. Fields which do not
+    exist for a particular block type are represented by ``None``.
+    """
+
+    main_data_begin: int
+    private_bits: int
+    scfsi: Optional[IntRows]
+    par2_3_length: IntRows
+    big_values: IntRows
+    global_gain: IntRows
+    scalefac_compress: IntRows
+    windows_switching_flag: IntRows
+    block_type: OptionalIntRows
+    mixed_blockflag: OptionalIntRows
+    table_select: OptionalIntTupleRows
+    subblock_gain: OptionalIntTupleRows
+    region0_count: OptionalIntRows
+    region1_count: OptionalIntRows
+    preflag: OptionalIntRows
+    scalfac_scale: IntRows
+    count1table_select: IntRows
+
+
+class MpegAudioLayer1FrameData(NamedTuple):
+    allocation: IntRows
+    scalefactors: OptionalIntRows
+    sample_codes: IntCube
+    bound: int
+    data_bits: int
+    ancillary_bits: int
+
+
+class MpegAudioLayer2FrameData(NamedTuple):
+    allocation: IntRows
+    scfsi: OptionalIntRows
+    scalefactors: ScalefactorRows
+    quantizer: IntRows
+    sample_code_bits: IntRows
+    quantizer_steps: IntRows
+    sample_codes: Int4D
+    sblimit: int
+    bound: int
+    data_bits: int
+    ancillary_bits: int
+
+
+class Id3v2Header(NamedTuple):
+    major_version: int
+    revision_number: int
+    a: int
+    b: int
+    c: int
+    d: int
+    e: int
+    f: int
+    g: int
+    h: int
+    size: int
+
+
+class APEv2Header(NamedTuple):
+    version: int
+    size: int
+    item_count: int
+    flags: bytes
+    reserved: int
+
+
+class Id3v1Fields(NamedTuple):
+    song_title: bytes
+    artist: bytes
+    album: bytes
+    year: bytes
+    comment: bytes
+    genre: int
+
+
+class Id3v11Fields(NamedTuple):
+    song_title: bytes
+    artist: bytes
+    album: bytes
+    year: bytes
+    comment: bytes
+    track: int
+    genre: int
+
+
 # dicts
 
 SAMPLE_RATE_MAP = {
@@ -194,63 +244,25 @@ SAMPLE_RATE_MAP = {
     },
 }
 
+_BITRATE_TABLES = {
+    ID.MPEG_1: {
+        Layer.LAYER_I: (0, 32, 64, 96, 128, 160, 192, 224, 256, 288, 320, 352, 384, 416, 448),
+        Layer.LAYER_II: (0, 32, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 384),
+        Layer.LAYER_III: (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320),
+    },
+    ID.MPEG_2: {
+        Layer.LAYER_I: (0, 32, 48, 56, 64, 80, 96, 112, 128, 144, 160, 176, 192, 224, 256),
+        Layer.LAYER_II: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+        Layer.LAYER_III: (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160),
+    },
+}
+
 BITRATE_MAP = {
-    1: {
-        ID.MPEG_1: {Layer.LAYER_I: 32, Layer.LAYER_II: 32, Layer.LAYER_III: 32},
-        ID.MPEG_2: {Layer.LAYER_I: 32, Layer.LAYER_II: 32, Layer.LAYER_III: 8},
-    },
-    2: {
-        ID.MPEG_1: {Layer.LAYER_I: 64, Layer.LAYER_II: 48, Layer.LAYER_III: 40},
-        ID.MPEG_2: {Layer.LAYER_I: 64, Layer.LAYER_II: 48, Layer.LAYER_III: 16},
-    },
-    3: {
-        ID.MPEG_1: {Layer.LAYER_I: 96, Layer.LAYER_II: 56, Layer.LAYER_III: 48},
-        ID.MPEG_2: {Layer.LAYER_I: 96, Layer.LAYER_II: 56, Layer.LAYER_III: 24},
-    },
-    4: {
-        ID.MPEG_1: {Layer.LAYER_I: 128, Layer.LAYER_II: 64, Layer.LAYER_III: 56},
-        ID.MPEG_2: {Layer.LAYER_I: 128, Layer.LAYER_II: 64, Layer.LAYER_III: 32},
-    },
-    5: {
-        ID.MPEG_1: {Layer.LAYER_I: 160, Layer.LAYER_II: 80, Layer.LAYER_III: 64},
-        ID.MPEG_2: {Layer.LAYER_I: 160, Layer.LAYER_II: 80, Layer.LAYER_III: 64},
-    },
-    6: {
-        ID.MPEG_1: {Layer.LAYER_I: 192, Layer.LAYER_II: 96, Layer.LAYER_III: 80},
-        ID.MPEG_2: {Layer.LAYER_I: 192, Layer.LAYER_II: 96, Layer.LAYER_III: 80},
-    },
-    7: {
-        ID.MPEG_1: {Layer.LAYER_I: 224, Layer.LAYER_II: 112, Layer.LAYER_III: 96},
-        ID.MPEG_2: {Layer.LAYER_I: 224, Layer.LAYER_II: 112, Layer.LAYER_III: 56},
-    },
-    8: {
-        ID.MPEG_1: {Layer.LAYER_I: 256, Layer.LAYER_II: 128, Layer.LAYER_III: 112},
-        ID.MPEG_2: {Layer.LAYER_I: 256, Layer.LAYER_II: 128, Layer.LAYER_III: 64},
-    },
-    9: {
-        ID.MPEG_1: {Layer.LAYER_I: 288, Layer.LAYER_II: 160, Layer.LAYER_III: 128},
-        ID.MPEG_2: {Layer.LAYER_I: 288, Layer.LAYER_II: 160, Layer.LAYER_III: 128},
-    },
-    10: {
-        ID.MPEG_1: {Layer.LAYER_I: 320, Layer.LAYER_II: 192, Layer.LAYER_III: 160},
-        ID.MPEG_2: {Layer.LAYER_I: 320, Layer.LAYER_II: 192, Layer.LAYER_III: 160},
-    },
-    11: {
-        ID.MPEG_1: {Layer.LAYER_I: 352, Layer.LAYER_II: 224, Layer.LAYER_III: 192},
-        ID.MPEG_2: {Layer.LAYER_I: 352, Layer.LAYER_II: 224, Layer.LAYER_III: 112},
-    },
-    12: {
-        ID.MPEG_1: {Layer.LAYER_I: 384, Layer.LAYER_II: 256, Layer.LAYER_III: 224},
-        ID.MPEG_2: {Layer.LAYER_I: 384, Layer.LAYER_II: 256, Layer.LAYER_III: 128},
-    },
-    13: {
-        ID.MPEG_1: {Layer.LAYER_I: 416, Layer.LAYER_II: 320, Layer.LAYER_III: 256},
-        ID.MPEG_2: {Layer.LAYER_I: 416, Layer.LAYER_II: 320, Layer.LAYER_III: 256},
-    },
-    14: {
-        ID.MPEG_1: {Layer.LAYER_I: 448, Layer.LAYER_II: 384, Layer.LAYER_III: 320},
-        ID.MPEG_2: {Layer.LAYER_I: 448, Layer.LAYER_II: 384, Layer.LAYER_III: 320},
-    },
+    index: {
+        version: {layer: bitrates[index] for layer, bitrates in layers.items()}
+        for version, layers in _BITRATE_TABLES.items()
+    }
+    for index in range(1, 15)
 }
 
 # mp3 exceptions
@@ -289,124 +301,225 @@ def id3_sync_safe_to_int(sync_safe: bytes) -> int:
 # mp3
 
 
-def get_frame_length(header: Mp3Header) -> int:
+def get_frame_length(header: Mp3Header, free_format_size: Optional[int] = None) -> int:
+    if header.bitrate == 0:
+        if free_format_size is None:
+            raise ParseError("Free-format frame length is not encoded in the header")
+        return free_format_size
+
     try:
         samplerate = SAMPLE_RATE_MAP[header.frequency][header.id]
-    except KeyError:
+        layer = Layer(header.layer)
+    except (KeyError, ValueError):
         raise Reserved(f"Found reserved value frequency={header.frequency} or id={header.id}")
 
-    layer = ID.MPEG_2 if header.layer == ID.MPEG_25 else header.layer
+    version = ID.MPEG_2 if header.id == ID.MPEG_25 else header.id
     try:
-        bitrate = BITRATE_MAP[header.bitrate][header.id][layer]
-    except KeyError:
+        bitrate = BITRATE_MAP[header.bitrate][version][layer]
+    except (KeyError, ValueError):
         raise ParseError(f"Invalid values bitrate={header.bitrate} id={header.id} layer={header.layer}")
 
-    return int(144 * bitrate * 1000 / samplerate + header.padding)
+    if layer == Layer.LAYER_I:
+        return (int(12 * bitrate * 1000 / samplerate) + header.padding) * 4
+    elif version == ID.MPEG_2 and layer == Layer.LAYER_III:
+        coefficient = 72
+        padding = header.padding
+    else:
+        coefficient = 144
+        padding = header.padding
+
+    return int(coefficient * bitrate * 1000 / samplerate) + padding
+
+
+def validate_header(header: Mp3Header) -> None:
+    if header.sync != 2047:
+        raise ParseError(f"Invalid MPEG audio sync {header.sync}")
+    if header.id == ID.RESERVED:
+        raise Reserved("Found reserved MPEG version")
+    if header.layer == Layer.RESERVED:
+        raise Reserved("Found reserved MPEG layer")
+    if header.mode != Mode.JOINT_STEREO and header.mode_extension:
+        raise ParseError("Mode extension is only valid for joint stereo")
+    if header.bitrate:
+        get_frame_length(header)
+
+
+def _read_frame_header(fr: BufferedBinaryIoT) -> Tuple[int, bytes, Mp3Header]:
+    pos = fr.tell()
+    raw_header, header = read_bits_to_namedtuple(
+        fr, MPEG_AUDIO_HEADER_FMT, Mp3Header, {1: ID, 2: Layer, 8: Mode}
+    )
+
+    if header.sync != 2047:
+        raise OutOfSync(pos, header)
+
+    try:
+        validate_header(header)
+    except ParseError as e:
+        raise InvalidFrame(f"Unsupported frame at pos {pos}: {e}") from e
+
+    return pos, raw_header, header
+
+
+def _get_frame_length_for_frame(fr: BufferedBinaryIoT, pos: int, header: Mp3Header) -> int:
+    if header.bitrate:
+        return get_frame_length(header)
+    return _get_free_format_frame_length(fr, pos, header)
+
+
+def _validate_frame_end(fr: BufferedBinaryIoT, pos: int, frame_length: int) -> None:
+    fr.seek(pos + frame_length - 1, os.SEEK_SET)
+    read_or_raise(fr, 1)
 
 
 def read_sideinfo(fr: BufferedBinaryIoT, header: Mp3Header) -> Tuple[bytes, Mp3SideInformation]:
-    single_channel = header.mode == Mode.SINGLE_CHANNEL
+    mpeg1 = header.id == ID.MPEG_1
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    granules = 2 if mpeg1 else 1
 
-    if single_channel:
-        SIDE_INFORMATION_SINGLE_FMT_1 = "u9 r5 r4"  # 18
-        # -> 18
-        SIDE_INFORMATION_SINGLE_FMT_2 = "r12 r9 r8 r4 b1"  # 34
-        SIDE_INFORMATION_SINGLE_FMT_3_SWITCH = "r2 r1 r10 r9"  # 22
-        SIDE_INFORMATION_SINGLE_FMT_3_NOSWITCH = "r15 u4 u3"  # 22
-        SIDE_INFORMATION_SINGLE_FMT_4 = "b1 r1 r1"  # 3
-        # -> 59
-        # total: 18 + 59 * 2 = 136 bits == 17 bytes
+    # ISO/IEC 11172-3, 2.4.2.7 and ISO/IEC 13818-3, 2.4.2.7.
+    main_data_begin_bits = 9 if mpeg1 else 8
+    private_bits_width = (5 if channels == 1 else 3) if mpeg1 else (1 if channels == 1 else 2)
+    scalefac_compress_width = 4 if mpeg1 else 9
+    sideinfo_bits = (
+        9 + private_bits_width + channels * 4 + 2 * channels * 59 if mpeg1 else 8 + private_bits_width + channels * 63
+    )
+    data = read_or_raise(fr, sideinfo_bits // 8)
+    offset = 0
 
-        data = fr.read(17)
-        delta = 0
+    main_data_begin, offset = _read_bits(data, offset, main_data_begin_bits)
+    private_bits, offset = _read_bits(data, offset, private_bits_width)
 
-        main_data_begin, private_bits, scfsi = bitstruct.unpack_from(SIDE_INFORMATION_SINGLE_FMT_1, data, delta)
-        delta += 18
-
-        for _i in range(2):
-            par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
-                SIDE_INFORMATION_SINGLE_FMT_2, data, delta
-            )
-            delta += 34
-
-            if windows_switching_flag == 1:
-                block_type, mixed_blockflag, table_select, subblock_gain = bitstruct.unpack_from(
-                    SIDE_INFORMATION_SINGLE_FMT_3_SWITCH, data, delta
-                )
-                region0_count = None
-                region1_count = None
-            else:
-                block_type = 10
-                mixed_blockflag = None
-                table_select, region0_count, region1_count = bitstruct.unpack_from(
-                    SIDE_INFORMATION_SINGLE_FMT_3_NOSWITCH, data, delta
-                )
-                subblock_gain = None
-            delta += 22
-
-            preflag, scalfac_scale, count1table_select = bitstruct.unpack_from(
-                SIDE_INFORMATION_SINGLE_FMT_4, data, delta
-            )
-            delta += 3
-
+    if mpeg1:
+        scfsi_rows = []
+        for _channel in range(channels):
+            row = []
+            for _ in range(4):
+                value, offset = _read_bits(data, offset, 1)
+                row.append(value)
+            scfsi_rows.append(tuple(row))
+        scfsi = tuple(scfsi_rows)
     else:
-        SIDE_INFORMATION_NONSINGLE_FMT_1 = "u9 r3 r8"  # 20
-        # -> 20
-        SIDE_INFORMATION_NONSINGLE_FMT_2 = "r24 r18 r16 r8 r2"  # 68
-        SIDE_INFORMATION_NONSINGLE_FMT_3_SWITCH = "r4 r2 r20 r18"  # 44
-        SIDE_INFORMATION_NONSINGLE_FMT_3_NOSWITCH = "r30 u8 u6"  # 44
-        SIDE_INFORMATION_NONSINGLE_FMT_4 = "r2 r2 r2"  # 6
-        # -> 118
-        # total: 20 + 118 * 2 = 256 bits == 32 bytes
+        scfsi = None
 
-        data = fr.read(32)
-        delta = 0
+    par2_3_length: List[Tuple[int, ...]] = []
+    big_values: List[Tuple[int, ...]] = []
+    global_gain: List[Tuple[int, ...]] = []
+    scalefac_compress: List[Tuple[int, ...]] = []
+    windows_switching_flag: List[Tuple[int, ...]] = []
+    block_type: List[Tuple[Optional[int], ...]] = []
+    mixed_blockflag: List[Tuple[Optional[int], ...]] = []
+    table_select: List[Tuple[Optional[Tuple[int, ...]], ...]] = []
+    subblock_gain: List[Tuple[Optional[Tuple[int, ...]], ...]] = []
+    region0_count: List[Tuple[Optional[int], ...]] = []
+    region1_count: List[Tuple[Optional[int], ...]] = []
+    preflag: List[Tuple[Optional[int], ...]] = []
+    scalfac_scale: List[Tuple[int, ...]] = []
+    count1table_select: List[Tuple[int, ...]] = []
 
-        main_data_begin, private_bits, scfsi = bitstruct.unpack_from(SIDE_INFORMATION_NONSINGLE_FMT_1, data, delta)
-        delta += 20
+    for _granule in range(granules):
+        par2_3_length_row: List[int] = []
+        big_values_row: List[int] = []
+        global_gain_row: List[int] = []
+        scalefac_compress_row: List[int] = []
+        windows_switching_flag_row: List[int] = []
+        block_type_row: List[Optional[int]] = []
+        mixed_blockflag_row: List[Optional[int]] = []
+        table_select_row: List[Optional[Tuple[int, ...]]] = []
+        subblock_gain_row: List[Optional[Tuple[int, ...]]] = []
+        region0_count_row: List[Optional[int]] = []
+        region1_count_row: List[Optional[int]] = []
+        preflag_row: List[Optional[int]] = []
+        scalfac_scale_row: List[int] = []
+        count1table_select_row: List[int] = []
 
-        for _i in range(2):
-            par2_3_length, big_values, global_gain, scalefac_compress, windows_switching_flag = bitstruct.unpack_from(
-                SIDE_INFORMATION_NONSINGLE_FMT_2, data, delta
-            )
-            delta += 68
+        for _channel in range(channels):
+            value, offset = _read_bits(data, offset, 12)
+            par2_3_length_row.append(value)
+            value, offset = _read_bits(data, offset, 9)
+            big_values_row.append(value)
+            value, offset = _read_bits(data, offset, 8)
+            global_gain_row.append(value)
+            value, offset = _read_bits(data, offset, scalefac_compress_width)
+            scalefac_compress_row.append(value)
+            value, offset = _read_bits(data, offset, 1)
+            windows_switching_flag_row.append(value)
 
-            if windows_switching_flag == 1:
-                block_type, mixed_blockflag, table_select, subblock_gain = bitstruct.unpack_from(
-                    SIDE_INFORMATION_NONSINGLE_FMT_3_SWITCH, data, delta
-                )
-                delta += 26
+            if value:
+                value, offset = _read_bits(data, offset, 2)
+                block_type_row.append(value)
+                value, offset = _read_bits(data, offset, 1)
+                mixed_blockflag_row.append(value)
+                table_values = []
+                for _ in range(2):
+                    value, offset = _read_bits(data, offset, 5)
+                    table_values.append(value)
+                table_select_row.append(tuple(table_values))
+                gain_values = []
+                for _ in range(3):
+                    value, offset = _read_bits(data, offset, 3)
+                    gain_values.append(value)
+                subblock_gain_row.append(tuple(gain_values))
+                region0_count_row.append(None)
+                region1_count_row.append(None)
             else:
-                block_type, mixed_blockflag = None, None
-                table_select, region0_count, region1_count = bitstruct.unpack_from(
-                    SIDE_INFORMATION_NONSINGLE_FMT_3_NOSWITCH, data, delta
-                )
-                delta += 30
-                subblock_gain = None
+                block_type_row.append(None)
+                mixed_blockflag_row.append(None)
+                table_values = []
+                for _ in range(3):
+                    value, offset = _read_bits(data, offset, 5)
+                    table_values.append(value)
+                table_select_row.append(tuple(table_values))
+                subblock_gain_row.append(None)
+                value, offset = _read_bits(data, offset, 4)
+                region0_count_row.append(value)
+                value, offset = _read_bits(data, offset, 3)
+                region1_count_row.append(value)
 
-            preflag, scalfac_scale, count1table_select = bitstruct.unpack_from(
-                SIDE_INFORMATION_NONSINGLE_FMT_4, data, delta
-            )
-            delta += 6
+            if mpeg1:
+                value, offset = _read_bits(data, offset, 1)
+                preflag_row.append(value)
+            else:
+                preflag_row.append(None)
+            value, offset = _read_bits(data, offset, 1)
+            scalfac_scale_row.append(value)
+            value, offset = _read_bits(data, offset, 1)
+            count1table_select_row.append(value)
 
+        par2_3_length.append(tuple(par2_3_length_row))
+        big_values.append(tuple(big_values_row))
+        global_gain.append(tuple(global_gain_row))
+        scalefac_compress.append(tuple(scalefac_compress_row))
+        windows_switching_flag.append(tuple(windows_switching_flag_row))
+        block_type.append(tuple(block_type_row))
+        mixed_blockflag.append(tuple(mixed_blockflag_row))
+        table_select.append(tuple(table_select_row))
+        subblock_gain.append(tuple(subblock_gain_row))
+        region0_count.append(tuple(region0_count_row))
+        region1_count.append(tuple(region1_count_row))
+        preflag.append(tuple(preflag_row))
+        scalfac_scale.append(tuple(scalfac_scale_row))
+        count1table_select.append(tuple(count1table_select_row))
+
+    assert offset == sideinfo_bits
     side_information = Mp3SideInformation(
         main_data_begin,
         private_bits,
         scfsi,
-        par2_3_length,
-        big_values,
-        global_gain,
-        scalefac_compress,
-        windows_switching_flag,
-        block_type,
-        mixed_blockflag,
-        table_select,
-        subblock_gain,
-        region0_count,
-        region1_count,
-        preflag,
-        scalfac_scale,
-        count1table_select,
+        tuple(par2_3_length),
+        tuple(big_values),
+        tuple(global_gain),
+        tuple(scalefac_compress),
+        tuple(windows_switching_flag),
+        tuple(block_type),
+        tuple(mixed_blockflag),
+        tuple(table_select),
+        tuple(subblock_gain),
+        tuple(region0_count),
+        tuple(region1_count),
+        tuple(preflag),
+        tuple(scalfac_scale),
+        tuple(count1table_select),
     )
 
     return data, side_information
@@ -416,64 +529,594 @@ class IntegrityCheckFailed(Exception):
     pass
 
 
-MpegAudioFrame = namedtuple("MpegAudioFrame", ["pos", "header", "crc", "sideinfo"])
+class MpegAudioLayer2SideInformation(NamedTuple):
+    allocation: IntRows
+    scfsi: OptionalIntRows
+    scalefactors: ScalefactorRows
+
+
+FrameSideInformation = Optional[
+    Union[MpegAudioLayer1FrameData, MpegAudioLayer2FrameData, MpegAudioLayer2SideInformation, Mp3SideInformation]
+]
+
+
+class MpegAudioFrame(NamedTuple):
+    pos: int
+    header: Mp3Header
+    crc: Optional[int]
+    sideinfo: FrameSideInformation
+
+
+MPEG_AUDIO_HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
+_MPEG_AUDIO_CRC16 = CRC(16, 0x8005, 0xFFFF, False, False, 0)
+
+_LAYER2_ALLOCATION_BITS = (
+    (4,) * 11 + (3,) * 12 + (2,) * 4,
+    (4,) * 11 + (3,) * 12 + (2,) * 7,
+    (4,) * 2 + (3,) * 6,
+    (4,) * 2 + (3,) * 10,
+)
+_LAYER2_SBLIMIT = (27, 30, 8, 12)
+_MPEG2_LAYER2_ALLOCATION_BITS = (4,) * 4 + (3,) * 7 + (2,) * 19
+_LAYER2_QUANTIZER_STEPS = (3, 5, 7, 9, 15, 31, 63, 127, 255, 511, 1023, 2047, 4095, 8191, 16383, 32767, 65535)
+_LAYER2_QUANTIZER_BITS = (-5, -7, 3, -10, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16)
+# These are the quantizer indices used by _LAYER2_QUANTIZER_BITS.  The
+# allocation tables use a few special codes (17, 18, 19) which represent
+# grouped 3-, 5-, and 9-level quantizers respectively.
+_LAYER2_QUANTIZER_MAP_1 = (
+    ((0, 0, 2, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16),) * 3
+    + ((0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16),) * 8
+    + ((0, 0, 1, 2, 3, 4, 5, 16),) * 12
+    + ((0, 0, 1, 16),) * 7
+)
+_LAYER2_QUANTIZER_MAP_3 = ((0, 0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15),) * 2 + (
+    (0, 0, 1, 3, 4, 5, 6, 7),
+) * 10
+_LAYER2_QUANTIZER_MAP_4 = (
+    ((0, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14),) * 4
+    + ((0, 0, 1, 3, 4, 5, 6, 7),) * 7
+    + ((0, 0, 1, 3),) * 19
+)
+_LAYER2_QUANTIZER_MAPS = (
+    _LAYER2_QUANTIZER_MAP_1[:27],
+    _LAYER2_QUANTIZER_MAP_1[:30],
+    _LAYER2_QUANTIZER_MAP_3[:8],
+    _LAYER2_QUANTIZER_MAP_3[:12],
+    _LAYER2_QUANTIZER_MAP_4,
+)
+_LAYER2_TABLES = (
+    (
+        (0, 2, 2, 2, 2, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1, 0),
+        (0, 2, 2, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+    ),
+    (
+        (0, 2, 2, 2, 2, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+        (0, 2, 2, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0),
+    ),
+    (
+        (0, 3, 3, 3, 3, 3, 3, 0, 0, 0, 1, 1, 1, 1, 1, 0),
+        (0, 3, 3, 0, 0, 0, 1, 1, 1, 1, 1, 1, 1, 1, 1, 0),
+    ),
+)
+
+
+def _read_bits(data: bytes, offset: int, size: int) -> Tuple[int, int]:
+    if offset < 0 or size < 0 or offset + size > len(data) * 8:
+        raise EOFError("Not enough frame bits")
+
+    value = 0
+    for index in range(offset, offset + size):
+        value = value << 1 | ((data[index // 8] >> (7 - index % 8)) & 1)
+    return value, offset + size
+
+
+def _layer1_layout(header: Mp3Header) -> Tuple[int, int]:
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    bound = 32
+    if header.mode == Mode.JOINT_STEREO:
+        bound = min(4 + 4 * header.mode_extension, 32)
+    return bound, channels
+
+
+def _mpeg1_layer2_table(header: Mp3Header) -> int:
+    if header.id != ID.MPEG_1:
+        raise ValueError("MPEG-1 Layer II table requested for another MPEG version")
+    try:
+        bitrate = BITRATE_MAP[header.bitrate][ID.MPEG_1][Layer.LAYER_II]
+        sample_rate = SAMPLE_RATE_MAP[header.frequency][ID.MPEG_1]
+    except (KeyError, ValueError):
+        raise ParseError(
+            f"Invalid MPEG-1 Layer II values bitrate={header.bitrate} frequency={header.frequency} mode={header.mode}"
+        )
+
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    channel_bitrate = bitrate / channels
+    if (sample_rate == 48000 and channel_bitrate >= 56) or 56 <= channel_bitrate <= 80:
+        return 0
+    if sample_rate != 48000 and channel_bitrate >= 96:
+        return 1
+    if sample_rate != 32000 and channel_bitrate <= 48:
+        return 2
+    return 3
+
+
+def _layer2_layout(
+    header: Mp3Header,
+) -> Tuple[Tuple[int, ...], Tuple[Tuple[int, ...], ...], int, int, int]:
+    if header.id == ID.MPEG_1:
+        table = _mpeg1_layer2_table(header)
+    else:
+        table = 4
+
+    allocation_bits = _MPEG2_LAYER2_ALLOCATION_BITS if table == 4 else _LAYER2_ALLOCATION_BITS[table]
+    quantizer_map = _LAYER2_QUANTIZER_MAPS[table]
+    sblimit = len(allocation_bits)
+    bound = sblimit
+    if header.mode == Mode.JOINT_STEREO:
+        bound = min(4 + 4 * header.mode_extension, sblimit)
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    return allocation_bits, quantizer_map, sblimit, bound, channels
+
+
+def _parse_layer1(data: bytes, header: Mp3Header) -> Tuple[MpegAudioLayer1FrameData, bytes, int]:
+    bound, channels = _layer1_layout(header)
+    offset = 0
+    allocation = [[0] * 32 for _ in range(channels)]
+
+    for subband in range(bound):
+        for channel in range(channels):
+            allocation[channel][subband], offset = _read_bits(data, offset, 4)
+            if allocation[channel][subband] == 15:
+                raise InvalidFrame("Reserved MPEG Layer I allocation code")
+    for subband in range(bound, 32):
+        value, offset = _read_bits(data, offset, 4)
+        if value == 15:
+            raise InvalidFrame("Reserved MPEG Layer I allocation code")
+        allocation[0][subband] = value
+        if channels == 2:
+            allocation[1][subband] = value
+
+    protected_bits = offset
+    scalefactors: List[List[Optional[int]]] = [[None] * 32 for _ in range(channels)]
+    for subband in range(bound):
+        for channel in range(channels):
+            if allocation[channel][subband]:
+                scalefactors[channel][subband], offset = _read_bits(data, offset, 6)
+    for subband in range(bound, 32):
+        if allocation[0][subband]:
+            for channel in range(channels):
+                scalefactors[channel][subband], offset = _read_bits(data, offset, 6)
+
+    sample_codes = [[[0] * 32 for _ in range(12)] for _ in range(channels)]
+    for sample in range(12):
+        for subband in range(bound):
+            for channel in range(channels):
+                bits = allocation[channel][subband]
+                if bits:
+                    sample_codes[channel][sample][subband], offset = _read_bits(data, offset, bits + 1)
+        for subband in range(bound, 32):
+            bits = allocation[0][subband]
+            if bits:
+                value, offset = _read_bits(data, offset, bits + 1)
+                sample_codes[0][sample][subband] = value
+                if channels == 2:
+                    sample_codes[1][sample][subband] = value
+
+    data_bits = offset
+    ancillary_bits = len(data) * 8 - data_bits
+    parsed = MpegAudioLayer1FrameData(
+        tuple(tuple(values) for values in allocation),
+        tuple(tuple(values) for values in scalefactors),
+        tuple(tuple(tuple(values) for values in channel) for channel in sample_codes),
+        bound,
+        data_bits,
+        ancillary_bits,
+    )
+    protected_data = data[: (protected_bits + 7) // 8]
+    return parsed, protected_data, protected_bits
+
+
+def _parse_layer2(data: bytes, header: Mp3Header) -> Tuple[MpegAudioLayer2FrameData, bytes, int]:
+    allocation_bits, quantizer_map, sblimit, bound, channels = _layer2_layout(header)
+    offset = 0
+    allocation = [[0] * sblimit for _ in range(channels)]
+    quantizer = [[0] * sblimit for _ in range(channels)]
+    sample_code_bits = [[0] * sblimit for _ in range(channels)]
+    quantizer_steps = [[0] * sblimit for _ in range(channels)]
+
+    for subband, width in enumerate(allocation_bits):
+        count = channels if subband < bound else 1
+        values = []
+        for _ in range(count):
+            value, offset = _read_bits(data, offset, width)
+            values.append(value)
+        if count == 1 and channels == 2:
+            values *= 2
+        for channel, value in enumerate(values):
+            allocation[channel][subband] = value
+            if value:
+                qindex = quantizer_map[subband][value]
+                quantizer[channel][subband] = qindex
+                sample_code_bits[channel][subband] = abs(_LAYER2_QUANTIZER_BITS[qindex])
+                quantizer_steps[channel][subband] = _LAYER2_QUANTIZER_STEPS[qindex]
+
+    protected_bits = offset
+    scfsi: List[List[Optional[int]]] = [[None] * sblimit for _ in range(channels)]
+    for subband in range(sblimit):
+        for channel in range(channels):
+            if allocation[channel][subband]:
+                scfsi[channel][subband], offset = _read_bits(data, offset, 2)
+    protected_bits = offset
+
+    scalefactors: List[List[Optional[Tuple[int, int, int]]]] = [[None] * sblimit for _ in range(channels)]
+    for subband in range(sblimit):
+        for channel in range(channels):
+            if not allocation[channel][subband]:
+                continue
+            selection = scfsi[channel][subband]
+            assert selection is not None
+            first, offset = _read_bits(data, offset, 6)
+            if selection == 0:
+                second, offset = _read_bits(data, offset, 6)
+                third, offset = _read_bits(data, offset, 6)
+            elif selection == 1:
+                third, offset = _read_bits(data, offset, 6)
+                second = first
+            elif selection == 2:
+                second = third = first
+            else:
+                second, offset = _read_bits(data, offset, 6)
+                third = second
+            scalefactors[channel][subband] = (first, second, third)
+
+    sample_codes: List[List[List[Tuple[int, ...]]]] = [
+        [[() for _ in range(sblimit)] for _ in range(12)] for _ in range(channels)
+    ]
+    codes: Tuple[int, ...]
+    for scalefactor_index in range(3):
+        for group_index in range(4):
+            sample_group = scalefactor_index * 4 + group_index
+            for subband in range(bound):
+                for channel in range(channels):
+                    qindex = quantizer[channel][subband]
+                    if not allocation[channel][subband]:
+                        continue
+                    bits = _LAYER2_QUANTIZER_BITS[qindex]
+                    if bits < 0:
+                        value, offset = _read_bits(data, offset, -bits)
+                        codes = (value,)
+                    else:
+                        values = []
+                        for _ in range(3):
+                            value, offset = _read_bits(data, offset, bits)
+                            values.append(value)
+                        codes = tuple(values)
+                    sample_codes[channel][sample_group][subband] = codes
+            for subband in range(bound, sblimit):
+                qindex = quantizer[0][subband]
+                if not allocation[0][subband]:
+                    continue
+                bits = _LAYER2_QUANTIZER_BITS[qindex]
+                if bits < 0:
+                    value, offset = _read_bits(data, offset, -bits)
+                    codes = (value,)
+                else:
+                    values = []
+                    for _ in range(3):
+                        value, offset = _read_bits(data, offset, bits)
+                        values.append(value)
+                    codes = tuple(values)
+                sample_codes[0][sample_group][subband] = codes
+                sample_codes[1][sample_group][subband] = codes
+
+    data_bits = offset
+    ancillary_bits = len(data) * 8 - data_bits
+    parsed = MpegAudioLayer2FrameData(
+        tuple(tuple(values) for values in allocation),
+        tuple(tuple(values) for values in scfsi),
+        tuple(tuple(values) for values in scalefactors),
+        tuple(tuple(values) for values in quantizer),
+        tuple(tuple(values) for values in sample_code_bits),
+        tuple(tuple(values) for values in quantizer_steps),
+        tuple(tuple(tuple(values) for values in channel) for channel in sample_codes),
+        sblimit,
+        bound,
+        data_bits,
+        ancillary_bits,
+    )
+    protected_data = data[: (protected_bits + 7) // 8]
+    return parsed, protected_data, protected_bits
+
+
+def _crc16_bits(data: bytes, size: int) -> int:
+    full_bytes, remainder = divmod(size, 8)
+    if not remainder:
+        return int(_MPEG_AUDIO_CRC16.calc(data[:full_bytes]))
+
+    bits = bitarray(endian="big")
+    bits.frombytes(data[: full_bytes + 1])
+    return int(_MPEG_AUDIO_CRC16.calc_bits(bits[:size]))
+
+
+def _mpeg1_layer2_layout(header: Mp3Header) -> Tuple[Tuple[int, ...], int, int, int]:
+    if header.id != ID.MPEG_1:
+        raise ValueError("MPEG-1 Layer II side information is not available for this frame")
+
+    table = _mpeg1_layer2_table(header)
+    allocation_bits = _LAYER2_ALLOCATION_BITS[table]
+    sblimit = _LAYER2_SBLIMIT[table]
+
+    bound = sblimit
+    if header.mode == Mode.JOINT_STEREO:
+        bound = min(4 + 4 * header.mode_extension, sblimit)
+
+    channels = 2 if header.mode != Mode.SINGLE_CHANNEL else 1
+    return allocation_bits, sblimit, bound, channels
+
+
+def _read_mpeg1_layer2_sideinfo(
+    fr: BufferedBinaryIoT, header: Mp3Header
+) -> Tuple[bytes, int, MpegAudioLayer2SideInformation]:
+    allocation_bits, sblimit, bound, channels = _mpeg1_layer2_layout(header)
+    max_bits = sum(allocation_bits[:bound]) * channels
+    max_bits += sum(allocation_bits[bound:sblimit])
+    max_bits += 2 * channels * sblimit
+    max_bits += 18 * channels * sblimit
+    data = read_or_raise(fr, (max_bits + 7) // 8)
+
+    offset = 0
+    allocations: List[List[int]] = [[] for _ in range(channels)]
+    for subband, width in enumerate(allocation_bits[:sblimit]):
+        count = channels if subband < bound else 1
+        values = []
+        for _ in range(count):
+            value, offset = _read_bits(data, offset, width)
+            values.append(value)
+        if count == 1 and channels == 2:
+            values *= 2
+        for channel, value in enumerate(values):
+            allocations[channel].append(value)
+
+    protected_bits = offset
+    scfsi: List[List[Optional[int]]] = [[None] * sblimit for _ in range(channels)]
+    for subband in range(sblimit):
+        for channel in range(channels):
+            if allocations[channel][subband]:
+                scfsi[channel][subband], offset = _read_bits(data, offset, 2)
+    protected_bits = offset
+
+    scalefactors: List[List[Optional[Tuple[int, int, int]]]] = [[None] * sblimit for _ in range(channels)]
+    for subband in range(sblimit):
+        for channel in range(channels):
+            if not allocations[channel][subband]:
+                continue
+
+            selection = scfsi[channel][subband]
+            assert selection is not None
+            first, offset = _read_bits(data, offset, 6)
+            if selection == 0:
+                second, offset = _read_bits(data, offset, 6)
+                third, offset = _read_bits(data, offset, 6)
+            elif selection == 1:
+                third, offset = _read_bits(data, offset, 6)
+                second = first
+            elif selection == 2:
+                second = third = first
+            else:
+                second, offset = _read_bits(data, offset, 6)
+                third = second
+            scalefactors[channel][subband] = (first, second, third)
+
+    sideinfo = MpegAudioLayer2SideInformation(
+        tuple(tuple(values) for values in allocations),
+        tuple(tuple(values) for values in scfsi),
+        tuple(tuple(values) for values in scalefactors),
+    )
+    return data, protected_bits, sideinfo
+
+
+def _read_layer1_crc_data(fr: BufferedBinaryIoT, header: Mp3Header) -> Tuple[bytes, int]:
+    bound = 32
+    if header.mode == Mode.JOINT_STEREO:
+        bound = 4 + 4 * header.mode_extension
+
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    protected_bits = 4 * (channels * bound + 32 - bound)
+    data = read_or_raise(fr, (protected_bits + 7) // 8)
+    return data, protected_bits
+
+
+def _read_mpeg2_layer2_crc_data(fr: BufferedBinaryIoT, header: Mp3Header) -> Tuple[bytes, int]:
+    allocation_bits = _MPEG2_LAYER2_ALLOCATION_BITS
+    sblimit = len(allocation_bits)
+    bound = sblimit
+    if header.mode == Mode.JOINT_STEREO:
+        bound = min(4 + 4 * header.mode_extension, sblimit)
+
+    channels = 1 if header.mode == Mode.SINGLE_CHANNEL else 2
+    allocation_size = sum(allocation_bits[:bound]) * channels + sum(allocation_bits[bound:])
+    max_bits = allocation_size + 2 * channels * sblimit
+    data = read_or_raise(fr, (max_bits + 7) // 8)
+
+    offset = 0
+    allocations: List[List[int]] = [[] for _ in range(channels)]
+    for subband, width in enumerate(allocation_bits):
+        count = channels if subband < bound else 1
+        values = []
+        for _ in range(count):
+            value, offset = _read_bits(data, offset, width)
+            values.append(value)
+        if count == 1 and channels == 2:
+            values *= 2
+        for channel, value in enumerate(values):
+            allocations[channel].append(value)
+
+    for subband in range(sblimit):
+        for channel in range(channels):
+            if allocations[channel][subband]:
+                _, offset = _read_bits(data, offset, 2)
+
+    return data, offset
+
+
+def _free_format_headers_match(first: Mp3Header, candidate: Mp3Header) -> bool:
+    return bool(
+        candidate.sync == 2047
+        and candidate.bitrate == 0
+        and candidate.id == first.id
+        and candidate.layer == first.layer
+        and candidate.frequency == first.frequency
+        and candidate.mode == first.mode
+        and candidate.mode_extension == first.mode_extension
+    )
+
+
+def _get_free_format_frame_length(fr: BufferedBinaryIoT, pos: int, header: Mp3Header) -> int:
+    """Infer a free-format frame size from the next matching frame header."""
+
+    body_start = fr.tell()
+    fr.seek(body_start, os.SEEK_SET)
+
+    try:
+        while True:
+            candidate_pos = fr.tell()
+            raw_candidate = fr.read(4)
+            if len(raw_candidate) < 4:
+                fr.seek(0, os.SEEK_END)
+                return fr.tell() - pos
+
+            candidate = Mp3Header._make(bitstruct.unpack(MPEG_AUDIO_HEADER_FMT, raw_candidate))
+            if _free_format_headers_match(header, candidate):
+                return candidate_pos - pos
+
+            fr.seek(candidate_pos + 1, os.SEEK_SET)
+    finally:
+        fr.seek(body_start, os.SEEK_SET)
 
 
 def read_frame(
     fr: BufferedBinaryIoT, content: bool = False, verify: bool = False
 ) -> Optional[Tuple[Optional[bytes], MpegAudioFrame]]:
-    HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
-
     if verify and not content:
         raise ValueError("verify requires content")
 
-    pos = fr.tell()
     raw: List[bytes] = []
 
     try:
-        raw_header, header = fbitunpack(fr, HEADER_FMT)
+        pos, raw_header, header = _read_frame_header(fr)
         raw.append(raw_header)
-    except Empty:  # end of file
+    except (Empty, EOFError):  # end of file or incomplete trailing header
         return None
 
-    header = Mp3Header._make(header)
+    sideinfo: FrameSideInformation = None
 
-    if header.sync != 2047:
-        raise OutOfSync(pos, header)
+    try:
+        if not header.protection:  # False means CRC data available
+            raw_crc = read_or_raise(fr, 2)
+            raw.append(raw_crc)
+            crc: Optional[int] = int.from_bytes(raw_crc, "big")
+        else:
+            crc = None
 
-    if not header.protection:  # False means CRC data available
-        raw_crc = read_or_raise(fr, 2)
-        raw.append(raw_crc)
-        crc: Optional[int] = int.from_bytes(raw_crc, "big")
-    else:
-        crc = None
+        frame_length = _get_frame_length_for_frame(fr, pos, header)
+        if content:
+            raw_content = read_or_raise(fr, frame_length - sum(map(len, raw)))
+            if header.layer == Layer.LAYER_I:
+                sideinfo, protected_data, protected_bits = _parse_layer1(raw_content, header)
+                if crc is not None and verify:
+                    calculated_crc = _crc16_bits(raw_header[2:] + protected_data, 16 + protected_bits)
+                    if crc != calculated_crc:
+                        raise IntegrityCheckFailed(
+                            f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}"
+                        )
+            elif header.layer == Layer.LAYER_II:
+                sideinfo, protected_data, protected_bits = _parse_layer2(raw_content, header)
+                if crc is not None and verify:
+                    calculated_crc = _crc16_bits(raw_header[2:] + protected_data, 16 + protected_bits)
+                    if crc != calculated_crc:
+                        raise IntegrityCheckFailed(
+                            f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}"
+                        )
+            else:
+                raw_sideinfo, sideinfo = read_sideinfo(BytesIO(raw_content), header)
+                if crc is not None and verify:
+                    calculated_crc = _crc16_bits(raw_header[2:] + raw_sideinfo, 16 + len(raw_sideinfo) * 8)
+                    if crc != calculated_crc:
+                        raise IntegrityCheckFailed(
+                            f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}"
+                        )
+            raw_out: Optional[bytes] = b"".join(raw) + raw_content
+            return raw_out, MpegAudioFrame(pos, header, crc, sideinfo)
 
-    raw_sideinfo, sideinfo = read_sideinfo(fr, header)
-    raw.append(raw_sideinfo)
+        if header.layer == Layer.LAYER_II:
+            if header.id == ID.MPEG_1:
+                raw_sideinfo, crc_bits, sideinfo = _read_mpeg1_layer2_sideinfo(fr, header)
+                raw.append(raw_sideinfo)
+                if crc is not None and verify:
+                    calculated_crc = _crc16_bits(raw_header[2:] + raw_sideinfo, 16 + crc_bits)
+                    if crc != calculated_crc:
+                        raise IntegrityCheckFailed(
+                            f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}"
+                        )
+            elif crc is not None and verify:
+                raw_crc_data, crc_bits = _read_mpeg2_layer2_crc_data(fr, header)
+                raw.append(raw_crc_data)
+                calculated_crc = _crc16_bits(raw_header[2:] + raw_crc_data, 16 + crc_bits)
+                if crc != calculated_crc:
+                    raise IntegrityCheckFailed(f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}")
+        elif header.layer == Layer.LAYER_I:
+            if crc is not None and verify:
+                raw_crc_data, crc_bits = _read_layer1_crc_data(fr, header)
+                raw.append(raw_crc_data)
+                calculated_crc = _crc16_bits(raw_header[2:] + raw_crc_data, 16 + crc_bits)
+                if crc != calculated_crc:
+                    raise IntegrityCheckFailed(f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}")
+        else:
+            raw_sideinfo, sideinfo = read_sideinfo(fr, header)
+            raw.append(raw_sideinfo)
 
-    if crc is not None and verify:
-        if header.layer != Layer.LAYER_III:
-            raise ValueError(
-                f"Integrity check is only supported for layer 3 files currently, not {Layer(header.layer).name}"
-            )
+            if crc is not None and verify:
+                if header.layer != Layer.LAYER_III:
+                    raise ValueError(
+                        f"Integrity check is only supported for layer 3 files currently, not {Layer(header.layer).name}"
+                    )
 
-        calculated_crc = crc16.cms(raw_header[2:] + raw_sideinfo)
-        if crc != calculated_crc:
-            raise IntegrityCheckFailed(f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}")
+                calculated_crc = _crc16_bits(raw_header[2:] + raw_sideinfo, 16 + len(raw_sideinfo) * 8)
+                if crc != calculated_crc:
+                    raise IntegrityCheckFailed(f"CRC check failed, stored crc {crc} != calculated crc {calculated_crc}")
 
-    # main_data, ancillary data
+        # main_data, ancillary data
 
-    frame_length = get_frame_length(header)
-    if content:
-        delta = sum(map(len, raw))
-        raw_content = read_or_raise(fr, frame_length - delta)
-        raw.append(raw_content)
-        raw_out: Optional[bytes] = b"".join(raw)
-    else:
         raw_out = None
-        fr.seek(pos + frame_length, os.SEEK_SET)
+        _validate_frame_end(fr, pos, frame_length)
+    except (Empty, EOFError) as e:
+        raise InvalidFrame(f"Truncated frame at pos {pos}") from e
 
     return raw_out, MpegAudioFrame(pos, header, crc, sideinfo)
+
+
+def find_first_valid_frame(fr: BufferedBinaryIoT) -> Optional[int]:
+    """Find a complete MPEG audio frame and leave the stream at its offset."""
+
+    while True:
+        pos = fr.tell()
+        try:
+            _, _, header = _read_frame_header(fr)
+        except (Empty, EOFError):
+            return None
+        except ParseError:
+            fr.seek(pos + 1, os.SEEK_SET)
+            continue
+
+        try:
+            frame_length = _get_frame_length_for_frame(fr, pos, header)
+            _validate_frame_end(fr, pos, frame_length)
+        except (ParseError, Empty, EOFError):
+            fr.seek(pos + 1, os.SEEK_SET)
+            continue
+
+        fr.seek(pos, os.SEEK_SET)
+        return pos
 
 
 Id3v2Fields = tuple
@@ -541,7 +1184,8 @@ def read_apev2(fr: BufferedBinaryIoT) -> Tuple[int, APEv2Header]:
         raise WrongSignature("No APEv2")
 
     header = APEv2Header._make(funpack(fr, "<LLL4sQ"))
-    assert header.version in (1000, 2000)
+    if header.version not in (1000, 2000):
+        raise ParseError(f"Unsupported APEv2 version {header.version}")
     print(header)
     fr.seek(header.size, os.SEEK_CUR)
     return pos, header
@@ -605,15 +1249,23 @@ def read_lyrics3v2(fr: BufferedBinaryIoT) -> Tuple[int, Dict[str, str]]:
     return pos, tags
 
 
-FramesOrTags = Union[MpegAudioFrame, Id3v2Tag]
+Tag = Union[
+    Id3v2Tag,
+    Tuple[int, APEv2Header],
+    Tuple[int, str],
+    Tuple[int, Dict[str, str]],
+    Tuple[int, Optional[Union[Id3v1Fields, Id3v11Fields]]],
+]
+FramesOrTags = Union[MpegAudioFrame, Tag]
 
 
 class NoTagsFound(Exception):
     pass
 
 
-def read_tags(fr: BufferedBinaryIoT):
-    for func in [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]:
+def read_tags(fr: BufferedBinaryIoT) -> Tuple[None, Tag]:
+    funcs: List[Callable[[BufferedBinaryIoT], Tag]] = [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]
+    for func in funcs:
         try:
             return None, func(fr)
         except WrongSignature:
@@ -654,13 +1306,28 @@ def read_mp3(
 
 
 def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
-    with open(out_path, "wb") as fw:
+    with open(in_path, "rb") as fr, open(out_path, "wb") as fw:
+        start = find_first_valid_frame(fr)
+        if start is None:
+            raise MaybeNotMp3(f"File doesn't contain a valid MPEG audio frame: {os.fspath(in_path)!r}")
+        if start != 0:
+            logger.warning(
+                "Found and skipped %d bytes of invalid data at the beginning of the file %s",
+                start,
+                os.fspath(in_path),
+            )
+
         try:
-            for raw, frame in read_mp3(in_path, content=True, verify=True):
+            while True:
+                result = read_frame(fr, content=True, verify=True)
+                if result is None:
+                    break
+
+                raw, parsed_frame = result
                 assert isinstance(raw, bytes), type(raw)
-                assert isinstance(frame, MpegAudioFrame), type(frame)
+                assert isinstance(parsed_frame, MpegAudioFrame), type(parsed_frame)
                 fw.write(raw)  # buffered
-        except InvalidFrame:
+        except (InvalidFrame, OutOfSync):
             print("stopped at invalid frame")
 
 
