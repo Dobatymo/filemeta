@@ -1,7 +1,25 @@
 {
     "ColorSpace": {
         "1": "sRGB",
+        "2": "Adobe RGB",
         "65535": "Uncalibrated"
+    },
+    "CompositeImage": {
+        "0": "Unknown",
+        "1": "Non-composite image",
+        "2": "General composite image",
+        "3": "Composite image captured when shooting"
+    },
+    "Compression": {
+        "1": "Uncompressed",
+        "2": "CCITT 1D",
+        "3": "T4 / Group 3 Fax",
+        "4": "T6 / Group 4 Fax",
+        "5": "LZW",
+        "6": "JPEG (old-style)",
+        "7": "JPEG",
+        "8": "Adobe Deflate",
+        "32773": "PackBits"
     },
     "Contrast": {
         "0": "Normal",
@@ -25,37 +43,59 @@
         "4": "Shutter priority",
         "5": "Creative program (biased toward depth of field)",
         "6": "Action program (biased toward fast shutter speed)",
-        "7": "Portrait mode (for closeup photos with the background out of focus)",
+        "7": "Portrait mode (for close-up photos with the background out of focus)",
         "8": "Landscape mode (for landscape photos with the background in focus)"
     },
+    "ExtraSamples": {
+        "0": "Unspecified",
+        "1": "Associated alpha",
+        "2": "Unassociated alpha"
+    },
+    "FileSource": {
+        "0": "Other",
+        "1": "Transparent-type scanner",
+        "2": "Reflex-type scanner",
+        "3": "Digital still camera"
+    },
+    "FillOrder": {
+        "1": "Normal",
+        "2": "Reversed"
+    },
     "Flash": {
-        "0": "Flash did not fire",
-        "1": "Flash fired",
-        "13": "Flash fired, compulsory flash mode, return light not detected",
-        "15": "Flash fired, compulsory flash mode, return light detected",
-        "16": "Flash did not fire, compulsory flash mode",
-        "24": "Flash did not fire, auto mode",
-        "25": "Flash fired, auto mode",
-        "29": "Flash fired, auto mode, return light not detected",
-        "31": "Flash fired, auto mode, return light detected",
+        "0": "No flash",
+        "1": "Fired",
+        "5": "Fired, return light not detected",
+        "7": "Fired, return light detected",
+        "8": "On, did not fire",
+        "9": "On, fired",
+        "13": "On, return light not detected",
+        "15": "On, return light detected",
+        "16": "Off, did not fire",
+        "20": "Off, did not fire, return light not detected",
+        "24": "Auto, did not fire",
+        "25": "Auto, fired",
+        "29": "Auto, fired, return light not detected",
+        "31": "Auto, fired, return light detected",
         "32": "No flash function",
-        "5": "Strobe return light not detected",
-        "65": "Flash fired, red-eye reduction mode",
-        "69": "Flash fired, red-eye reduction mode, return light not detected",
-        "7": "Strobe return light detected",
-        "71": "Flash fired, red-eye reduction mode, return light detected",
-        "73": "Flash fired, compulsory flash mode, red-eye reduction mode",
-        "77": "Flash fired, compulsory flash mode, red-eye reduction mode, return light not detected",
-        "79": "Flash fired, compulsory flash mode, red-eye reduction mode, return light detected",
-        "89": "Flash fired, auto mode, red-eye reduction mode",
-        "9": "Flash fired, compulsory flash mode",
-        "93": "Flash fired, auto mode, return light not detected, red-eye reduction mode",
-        "95": "Flash fired, auto mode, return light detected, red-eye reduction mode"
+        "48": "Off, no flash function",
+        "65": "Fired, red-eye reduction",
+        "69": "Fired, red-eye reduction, return light not detected",
+        "71": "Fired, red-eye reduction, return light detected",
+        "73": "On, red-eye reduction",
+        "77": "On, red-eye reduction, return light not detected",
+        "79": "On, red-eye reduction, return light detected",
+        "80": "Off, red-eye reduction",
+        "88": "Auto, did not fire, red-eye reduction",
+        "89": "Auto, fired, red-eye reduction",
+        "93": "Auto, fired, red-eye reduction, return light not detected",
+        "95": "Auto, fired, red-eye reduction, return light detected"
     },
     "FocalPlaneResolutionUnit": {
         "1": "No absolute unit of measurement",
         "2": "Inch",
-        "3": "Centimeter"
+        "3": "Centimeter",
+        "4": "Millimeter",
+        "5": "Micrometer"
     },
     "GainControl": {
         "0": "None",
@@ -64,63 +104,108 @@
         "3": "Low gain down",
         "4": "High gain down"
     },
+    "GPSAltitudeRef": {
+        "0": "Positive ellipsoidal height",
+        "1": "Negative ellipsoidal height",
+        "2": "Positive sea level value",
+        "3": "Negative sea level value"
+    },
+    "GPSDifferential": {
+        "0": "No differential correction",
+        "1": "Differential correction applied"
+    },
+    "InkSet": {
+        "1": "CMYK",
+        "2": "Not CMYK"
+    },
     "LightSource": {
         "0": "Unknown",
         "1": "Daylight",
+        "2": "Fluorescent",
+        "3": "Tungsten (incandescent)",
+        "4": "Flash",
+        "9": "Fine weather",
         "10": "Cloudy weather",
         "11": "Shade",
-        "12": "Daylight fluorescent (D 5700 - 7100K)",
-        "13": "Day white fluorescent (N 4600 - 5400K)",
-        "14": "Cool white fluorescent (W 3900 - 4500K)",
-        "15": "White fluorescent (WW 3200 - 3700K)",
+        "12": "Daylight fluorescent (D 5700–7100 K)",
+        "13": "Day white fluorescent (N 4600–5500 K)",
+        "14": "Cool white fluorescent (W 3800–4500 K)",
+        "15": "White fluorescent (WW 3250–3800 K)",
+        "16": "Warm white fluorescent (L 2600–3250 K)",
         "17": "Standard light A",
         "18": "Standard light B",
         "19": "Standard light C",
-        "2": "Fluorescent",
         "20": "D55",
         "21": "D65",
         "22": "D75",
         "23": "D50",
         "24": "ISO studio tungsten",
-        "255": "Other light source",
-        "3": "Tungsten (incandescent light)",
-        "4": "Flash",
-        "9": "Fine weather"
+        "255": "Other light source"
     },
     "MeteringMode": {
-        "0": "unknown",
+        "0": "Unknown",
         "1": "Average",
-        "2": "CenterWeightedAverage",
-        "255": "other",
+        "2": "Center-weighted average",
         "3": "Spot",
-        "4": "MultiSpot",
+        "4": "Multi-spot",
         "5": "Pattern",
-        "6": "Partial"
+        "6": "Partial",
+        "255": "Other"
+    },
+    "NewSubfileType": {
+        "0": "Full-resolution image",
+        "1": "Reduced-resolution image",
+        "2": "Single page of a multi-page image"
+    },
+    "Orientation": {
+        "1": "Horizontal (normal)",
+        "2": "Mirror horizontal",
+        "3": "Rotate 180°",
+        "4": "Mirror vertical",
+        "5": "Mirror horizontal and rotate 270° clockwise",
+        "6": "Rotate 90° clockwise",
+        "7": "Mirror horizontal and rotate 90° clockwise",
+        "8": "Rotate 270° clockwise"
     },
     "PhotometricInterpretation": {
         "0": "White is zero",
         "1": "Black is zero",
-        "10": "ITU L*a*b*",
         "2": "RGB",
-        "3": "Palette color",
-        "4": "Transparency Mask",
-        "5": "Seperated",
+        "3": "RGB palette",
+        "4": "Transparency mask",
+        "5": "CMYK",
         "6": "YCbCr",
         "8": "CIE L*a*b*",
-        "9": "ICC L*a*b*"
+        "9": "ICC L*a*b*",
+        "10": "ITU L*a*b*",
+        "32803": "Color filter array",
+        "34892": "Linear raw"
     },
     "PlanarConfiguration": {
-        "1": "Chunky format",
-        "2": "Planar format"
+        "1": "Chunky",
+        "2": "Planar"
+    },
+    "Predictor": {
+        "1": "None",
+        "2": "Horizontal differencing"
     },
     "ResolutionUnit": {
-        "2": "inches",
-        "3": "centimeters"
+        "1": "None",
+        "2": "Inch",
+        "3": "Centimeter"
     },
     "Saturation": {
         "0": "Normal",
         "1": "Low saturation",
         "2": "High saturation"
+    },
+    "SampleFormat": {
+        "1": "Unsigned integer",
+        "2": "Signed integer",
+        "3": "Floating point",
+        "4": "Undefined",
+        "5": "Complex integer",
+        "6": "Complex floating point"
     },
     "SceneCaptureType": {
         "0": "Standard",
@@ -142,13 +227,13 @@
     },
     "SensitivityType": {
         "0": "Unknown",
-        "1": "Standard Output Sensitivity",
-        "2": "Recommended Exposure Index",
-        "3": "ISO Speed",
-        "4": "Standard Output Sensitivity and Recommended Exposure Index",
-        "5": "Standard Output Sensitivity and ISO Speed",
-        "6": "Recommended Exposure Index and ISO Speed",
-        "7": "Standard Output Sensitivity, Recommended Exposure Index and ISO Speed"
+        "1": "Standard output sensitivity",
+        "2": "Recommended exposure index",
+        "3": "ISO speed",
+        "4": "Standard output sensitivity and recommended exposure index",
+        "5": "Standard output sensitivity and ISO speed",
+        "6": "Recommended exposure index and ISO speed",
+        "7": "Standard output sensitivity, recommended exposure index and ISO speed"
     },
     "Sharpness": {
         "0": "Normal",
@@ -156,13 +241,27 @@
         "2": "Hard"
     },
     "SubjectDistanceRange": {
-        "0": "unknown",
+        "0": "Unknown",
         "1": "Macro",
         "2": "Close view",
         "3": "Distant view"
     },
+    "SubfileType": {
+        "1": "Full-resolution image",
+        "2": "Reduced-resolution image",
+        "3": "Single page of a multi-page image"
+    },
+    "Threshholding": {
+        "1": "No dithering or halftoning",
+        "2": "Ordered dither or halftone",
+        "3": "Randomized dither"
+    },
     "WhiteBalance": {
         "0": "Auto white balance",
         "1": "Manual white balance"
+    },
+    "YCbCrPositioning": {
+        "1": "Centered",
+        "2": "Co-sited"
     }
 }
