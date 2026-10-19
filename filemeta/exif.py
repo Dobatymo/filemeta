@@ -102,10 +102,16 @@ def exif_table(path: str, encoding: str = "utf-8") -> Iterator[Tuple[str, str, s
                     continue
 
             elif type in (piexif.TYPES.Undefined, piexif.TYPES.Float, piexif.TYPES.DFloat):
-                value_label = value
+                if name in exif_value_labels and isinstance(value, bytes) and len(value) == 1:
+                    value_label = exif_value_label(name, value[0])
+                else:
+                    value_label = value
 
             elif type in (piexif.TYPES.Byte, piexif.TYPES.SByte):
-                value_label = value
+                if name in exif_value_labels and isinstance(value, int):
+                    value_label = exif_value_label(name, value)
+                else:
+                    value_label = value
 
             else:
                 logger.error("Invalid exif type name=%s type=% in file %s", name, type, path)

@@ -31,9 +31,9 @@ def read_until(fr: BufferedBinaryIoT, delimiter: bytes) -> bytes:
     delim_len = len(delimiter)
 
     while ret[-delim_len:] != delim:
-        ret.append(fr.read(1)[0])
+        ret.append(read_or_raise(fr, 1)[0])
 
-    return bytes(ret[:delim_len])
+    return bytes(ret[:-delim_len])
 
 
 def transform_iterable(it: Iterable, conv: Dict[int, Callable]) -> list:
@@ -290,6 +290,8 @@ class InvalidFrame(ParseError):
 
 
 def id3_sync_safe_to_int(sync_safe: bytes) -> int:
+    if len(sync_safe) != 4 or any(value & 0x80 for value in sync_safe):
+        raise ParseError("Invalid ID3 synchsafe integer")
     byte0 = sync_safe[0]
     byte1 = sync_safe[1]
     byte2 = sync_safe[2]
@@ -338,8 +340,15 @@ def validate_header(header: Mp3Header) -> None:
         raise Reserved("Found reserved MPEG version")
     if header.layer == Layer.RESERVED:
         raise Reserved("Found reserved MPEG layer")
-    if header.mode != Mode.JOINT_STEREO and header.mode_extension:
-        raise ParseError("Mode extension is only valid for joint stereo")
+    if header.frequency not in SAMPLE_RATE_MAP:
+        raise Reserved("Found reserved sampling frequency")
+    if header.emphasis == 2:
+        raise Reserved("Found reserved emphasis")
+    if header.id == ID.MPEG_1 and header.layer == Layer.LAYER_II:
+        if (header.bitrate in (1, 2, 3, 5) and header.mode != Mode.SINGLE_CHANNEL) or (
+            header.bitrate >= 11 and header.mode == Mode.SINGLE_CHANNEL
+        ):
+            raise InvalidFrame("Forbidden MPEG-1 Layer II bitrate/mode combination")
     if header.bitrate:
         get_frame_length(header)
 
@@ -349,9 +358,7 @@ MPEG_AUDIO_HEADER_FMT = "u11 u2 u2 b1 u4 u2 u1 b1 u2 u2 b1 b1 u2"
 
 def _read_frame_header(fr: BufferedBinaryIoT) -> Tuple[int, bytes, Mp3Header]:
     pos = fr.tell()
-    raw_header, header = read_bits_to_namedtuple(
-        fr, MPEG_AUDIO_HEADER_FMT, Mp3Header, {1: ID, 2: Layer, 8: Mode}
-    )
+    raw_header, header = read_bits_to_namedtuple(fr, MPEG_AUDIO_HEADER_FMT, Mp3Header, {1: ID, 2: Layer, 8: Mode})
 
     if header.sync != 2047:
         raise OutOfSync(pos, header)
@@ -371,8 +378,7 @@ def _free_format_headers_match(first: Mp3Header, candidate: Mp3Header) -> bool:
         and candidate.id == first.id
         and candidate.layer == first.layer
         and candidate.frequency == first.frequency
-        and candidate.mode == first.mode
-        and candidate.mode_extension == first.mode_extension
+        and candidate.emphasis != 2
     )
 
 
@@ -387,8 +393,14 @@ def _get_free_format_frame_length(fr: BufferedBinaryIoT, pos: int, header: Mp3He
             candidate_pos = fr.tell()
             raw_candidate = fr.read(4)
             if len(raw_candidate) < 4:
-                fr.seek(0, os.SEEK_END)
-                return fr.tell() - pos
+                # The last frame must retain the stream's fixed size, allowing for padding.
+                for previous_pos in range(pos - 4, -1, -1):
+                    fr.seek(previous_pos)
+                    previous = Mp3Header._make(bitstruct.unpack(MPEG_AUDIO_HEADER_FMT, fr.read(4)))
+                    if _free_format_headers_match(header, previous):
+                        slot = 4 if header.layer == Layer.LAYER_I else 1
+                        return pos - previous_pos + slot * (header.padding - previous.padding)
+                raise InvalidFrame("Cannot infer a free-format frame length without another frame")
 
             candidate = Mp3Header._make(bitstruct.unpack(MPEG_AUDIO_HEADER_FMT, raw_candidate))
             if _free_format_headers_match(header, candidate):
@@ -593,6 +605,8 @@ class MpegAudioFrame(NamedTuple):
     header: Mp3Header
     crc: Optional[int]
     sideinfo: FrameSideInformation
+
+
 _MPEG_AUDIO_CRC16 = CRC(16, 0x8005, 0xFFFF, False, False, 0)
 
 _LAYER2_ALLOCATION_BITS = (
@@ -656,6 +670,8 @@ def _layer1_layout(header: Mp3Header) -> Tuple[int, int]:
 def _mpeg1_layer2_table(header: Mp3Header) -> int:
     if header.id != ID.MPEG_1:
         raise ValueError("MPEG-1 Layer II table requested for another MPEG version")
+    if header.bitrate == 0:
+        return 0 if header.frequency == 1 else 1
     try:
         bitrate = BITRATE_MAP[header.bitrate][ID.MPEG_1][Layer.LAYER_II]
         sample_rate = SAMPLE_RATE_MAP[header.frequency][ID.MPEG_1]
@@ -1002,10 +1018,16 @@ def read_frame(
 
     raw: List[bytes] = []
 
+    pos = fr.tell()
     try:
         pos, raw_header, header = _read_frame_header(fr)
         raw.append(raw_header)
-    except (Empty, EOFError):  # end of file or incomplete trailing header
+    except Empty:
+        return None
+    except EOFError as e:
+        fr.seek(pos)
+        if fr.read(3) == b"ID3":
+            raise InvalidFrame("Truncated ID3v2 header") from e
         return None
 
     sideinfo: FrameSideInformation = None
@@ -1127,20 +1149,32 @@ def read_id3v2(fr: BufferedBinaryIoT, parse: bool = False) -> Id3v2Tag:
     pos = fr.tell()
 
     if fr.read(3) != b"ID3":
+        fr.seek(pos)
         raise WrongSignature("No ID3v2")
 
     fmt = ">u8 u8 b1 b1 b1 b1 b1 b1 b1 b1 r32"
-    raw, id3_header = read_bits_to_namedtuple(fr, fmt, Id3v2Header, {10: id3_sync_safe_to_int})
-
-    # If the 0x10 bit of byte 5 is set, let OFFSET = OFFSET + 10 (for the footer).
+    try:
+        raw, id3_header = read_bits_to_namedtuple(fr, fmt, Id3v2Header, {10: id3_sync_safe_to_int})
+    except (Empty, EOFError) as e:
+        raise InvalidFrame("Truncated ID3v2 header") from e
+    masks = {2: 0xC0, 3: 0xE0, 4: 0xF0}
+    if id3_header.major_version not in masks or id3_header.revision_number == 255:
+        raise ParseError("Unsupported ID3v2 version")
+    if raw[2] & ~masks[id3_header.major_version]:
+        raise ParseError("Reserved ID3v2 flags")
 
     if parse:
         raise RuntimeError("Not implemented yet")
         # return pos, id3_header, Id3v2Fields._make()
 
-    else:
-        fr.seek(id3_header.size, os.SEEK_CUR)
-        return pos, id3_header, None
+    try:
+        _validate_frame_end(fr, pos, 10 + id3_header.size)
+        if id3_header.major_version == 4 and id3_header.d:
+            if read_or_raise(fr, 10) != b"3DI" + raw:
+                raise InvalidFrame("Invalid ID3v2 footer")
+    except (Empty, EOFError) as e:
+        raise InvalidFrame("Truncated ID3v2 tag") from e
+    return pos, id3_header, None
 
 
 def read_id3v1(fr: BufferedBinaryIoT, parse: bool = True) -> Tuple[int, Optional[Union[Id3v1Fields, Id3v11Fields]]]:
@@ -1162,9 +1196,9 @@ def read_id3v1(fr: BufferedBinaryIoT, parse: bool = True) -> Tuple[int, Optional
         artist = artist.rstrip(zero)
         album = album.rstrip(zero)
 
-        if comment[-1] != zero and comment[-2] == zero:
-            comment = comment[:-2].rstrip(zero)
+        if comment[-1] != 0 and comment[-2] == 0:
             track = comment[-1]
+            comment = comment[:-2].rstrip(zero)
             return pos, Id3v11Fields(song_title, artist, album, year, comment, track, genre)
         else:
             comment = comment.rstrip(zero)
@@ -1175,19 +1209,79 @@ def read_id3v1(fr: BufferedBinaryIoT, parse: bool = True) -> Tuple[int, Optional
         return pos, None
 
 
+def _get_tag_end(fr: BufferedBinaryIoT) -> int:
+    pos = fr.tell()
+    try:
+        fr.seek(0, os.SEEK_END)
+        end = fr.tell()
+        if end >= 128:
+            fr.seek(end - 128)
+            if fr.read(3) == b"TAG":
+                end -= 128
+        return end
+    finally:
+        fr.seek(pos)
+
+
+def _read_ape_footer(fr: BufferedBinaryIoT) -> Optional[Tuple[int, APEv2Header]]:
+    pos = fr.tell()
+    try:
+        end = _get_tag_end(fr)
+        if end - pos >= 32:
+            fr.seek(end - 32)
+            if fr.read(8) == b"APETAGEX":
+                return end - 32, APEv2Header._make(funpack(fr, "<LLL4sQ"))
+        return None
+    finally:
+        fr.seek(pos)
+
+
 def read_apev2(fr: BufferedBinaryIoT) -> Tuple[int, APEv2Header]:
     pos = fr.tell()
-    tag = read_or_raise(fr, 8)
-
-    if tag != b"APETAGEX":
-        fr.seek(pos)
-        raise WrongSignature("No APEv2")
-
-    header = APEv2Header._make(funpack(fr, "<LLL4sQ"))
+    footer_pos = None
+    if fr.read(8) != b"APETAGEX":
+        footer = _read_ape_footer(fr)
+        if footer is None:
+            fr.seek(pos)
+            raise WrongSignature("No APEv2")
+        footer_pos, header = footer
+    else:
+        try:
+            header = APEv2Header._make(funpack(fr, "<LLL4sQ"))
+        except (Empty, EOFError) as e:
+            raise InvalidFrame("Truncated APE tag") from e
     if header.version not in (1000, 2000):
         raise ParseError(f"Unsupported APEv2 version {header.version}")
-    print(header)
-    fr.seek(header.size, os.SEEK_CUR)
+    flags = int.from_bytes(header.flags, "little")
+    if header.size < 32 or header.reserved or flags & 0x1FFFFFFE:
+        raise InvalidFrame("Invalid APE tag header")
+    is_header = bool(flags & (1 << 29))
+    if footer_pos is not None and (is_header or footer_pos + 32 - header.size != pos):
+        fr.seek(pos)
+        raise WrongSignature("No APEv2")
+    if is_header:
+        end = pos + 32 + header.size
+        if flags & (1 << 30):
+            end -= 32
+        else:
+            fr.seek(end - 32)
+            raw_footer = read_or_raise(fr, 32)
+            expected = b"APETAGEX" + struct.pack(
+                "<LLL4sQ",
+                header.version,
+                header.size,
+                header.item_count,
+                (flags & ~(1 << 29)).to_bytes(4, "little"),
+                0,
+            )
+            if raw_footer != expected:
+                raise InvalidFrame("Invalid APE footer")
+    else:
+        end = (footer_pos if footer_pos is not None else pos) + 32
+    try:
+        _validate_frame_end(fr, pos, end - pos)
+    except (Empty, EOFError) as e:
+        raise InvalidFrame("Truncated APE tag") from e
     return pos, header
 
 
@@ -1199,13 +1293,16 @@ def read_lyrics3v1(fr: BufferedBinaryIoT) -> Tuple[int, str]:
     tag_end = b"LYRICSEND"
 
     pos = fr.tell()
-    tag = read_or_raise(fr, len(tag_begin))
+    tag = fr.read(len(tag_begin))
 
     if tag != tag_begin:
         fr.seek(pos)
         raise WrongSignature("No Lyrics3 v1")
 
-    lyrics = read_until(fr, tag_end).decode("iso-8859-1")
+    try:
+        lyrics = read_until(fr, tag_end).decode("iso-8859-1")
+    except (Empty, EOFError) as e:
+        raise InvalidFrame("Truncated Lyrics3 v1 tag") from e
 
     return pos, lyrics
 
@@ -1217,35 +1314,49 @@ def read_lyrics3v2(fr: BufferedBinaryIoT) -> Tuple[int, Dict[str, str]]:
     pos = fr.tell()
     tag_begin = b"LYRICSBEGIN"
 
-    tag = read_or_raise(fr, len(tag_begin))
+    tag = fr.read(len(tag_begin))
 
     if tag != tag_begin:
         fr.seek(pos)
         raise WrongSignature("No Lyrics3 v2")
 
+    end = _get_tag_end(fr)
+    if end - pos < 26:
+        fr.seek(pos)
+        raise WrongSignature("No Lyrics3 v2")
+    fr.seek(end - 15)
+    size_, tag = funpack(fr, "6s9s")
+    if tag != b"LYRICS200":
+        fr.seek(pos)
+        raise WrongSignature("No Lyrics3 v2")
+    if not size_.isdigit() or int(size_) != end - 15 - pos:
+        raise InvalidFrame("Invalid Lyrics3 v2 tag size")
+    fr.seek(pos + len(tag_begin))
+
     tags: Dict[str, str] = {}
     defined_fields = {"IND", "LYR", "INF", "AUT", "EAL", "EAR", "ETT", "IMG"}
 
     try:
-        while True:
-            size_, tag = funpack(fr, "6s9s")
-            if tag == b"LYRICS200":
-                break
-            else:
-                fr.seek(-15, os.SEEK_CUR)
-
-            field_id_, size_ = funpack(fr, "3s6s")
+        while fr.tell() < end - 15:
+            if end - 15 - fr.tell() < 8:
+                raise InvalidFrame("Truncated Lyrics3 v2 field")
+            field_id_, size_ = funpack(fr, "3s5s")
             field_id = field_id_.decode("ascii")
             if field_id not in defined_fields:
                 logger.warning("Found undefined field: %s", field_id)
 
+            if not size_.isdigit():
+                raise InvalidFrame("Invalid Lyrics3 v2 field size")
             size = int(size_)
+            if size > end - 15 - fr.tell():
+                raise InvalidFrame("Truncated Lyrics3 v2 field")
             information = read_or_raise(fr, size).decode("iso-8859-1")
             tags[field_id] = information  # fixme: duplicated fields are overwritten. what's the spec here?
 
-    except Exception:
-        raise RuntimeError("Invalid Lyrics v2 tag")
+    except (Empty, EOFError, UnicodeDecodeError, ValueError) as e:
+        raise InvalidFrame("Invalid Lyrics3 v2 tag") from e
 
+    fr.seek(end)
     return pos, tags
 
 
@@ -1264,7 +1375,21 @@ class NoTagsFound(Exception):
 
 
 def read_tags(fr: BufferedBinaryIoT) -> Tuple[None, Tag]:
-    funcs: List[Callable[[BufferedBinaryIoT], Tag]] = [read_apev2, read_lyrics3v2, read_lyrics3v1, read_id3v1]
+    try:
+        id3v2 = read_id3v2(fr)
+    except WrongSignature:
+        pass
+    else:
+        if id3v2[1].major_version != 4 or not id3v2[1].d:
+            raise InvalidFrame("An appended ID3v2 tag requires a v2.4 footer")
+        return None, id3v2
+
+    funcs: List[Callable[[BufferedBinaryIoT], Tag]] = [
+        read_apev2,
+        read_lyrics3v2,
+        read_lyrics3v1,
+        read_id3v1,
+    ]
     for func in funcs:
         try:
             return None, func(fr)
@@ -1278,12 +1403,40 @@ def read_mp3(
     path: PathType, content: bool = False, verify: bool = False
 ) -> Iterator[Tuple[Optional[bytes], FramesOrTags]]:
     with open(path, "rb") as fr:
-        try:
-            yield None, read_id3v2(fr)
-        except (WrongSignature, RuntimeError):
-            fr.seek(0)
+        ape_footer = _read_ape_footer(fr)
+        ape_start = None
+        if ape_footer is not None:
+            footer_pos, footer = ape_footer
+            if not int.from_bytes(footer.flags, "little") & (1 << 31):
+                ape_start = footer_pos + 32 - footer.size
+        while True:
+            tag_start = fr.tell()
+            try:
+                id3v2 = read_id3v2(fr)
+            except (WrongSignature, RuntimeError):
+                fr.seek(tag_start)
+                break
+
+            yield None, id3v2
+            padding_start = fr.tell()
+            has_padding = fr.read(1) == b"\0"
+            fr.seek(padding_start)
+            if has_padding:
+                while True:
+                    chunk_start = fr.tell()
+                    chunk = fr.read(4096)
+                    non_padding = chunk.lstrip(b"\0")
+                    if non_padding:
+                        fr.seek(chunk_start + len(chunk) - len(non_padding))
+                        break
+                    if not chunk:
+                        break
 
         while True:
+            # A headerless APE item's size can itself look like an MPEG frame header.
+            if fr.tell() == ape_start:
+                yield None, read_apev2(fr)
+                continue
             try:
                 frame = read_frame(fr, content, verify)
                 if frame is None:
@@ -1295,8 +1448,6 @@ def read_mp3(
 
                 try:
                     yield read_tags(fr)
-                except Empty:
-                    return
                 except NoTagsFound:
                     first_8_bytes = fr.read(8)
                     if e.pos == 0:
@@ -1306,6 +1457,8 @@ def read_mp3(
 
 
 def copy_mpeg_audio(in_path: PathType, out_path: PathType) -> None:
+    if os.path.exists(out_path) and os.path.samefile(in_path, out_path):
+        raise ValueError("Input and output must be different files")
     with open(in_path, "rb") as fr, open(out_path, "wb") as fw:
         start = find_first_valid_frame(fr)
         if start is None:
