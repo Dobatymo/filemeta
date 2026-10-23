@@ -82,3 +82,6 @@ local_partial_types = true
 strict_equality = true
 warn_unused_configs = true
 no_implicit_optional = true
+
+[tool.ruff.lint.pyupgrade]
+keep-runtime-typing = true

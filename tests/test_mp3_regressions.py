@@ -44,7 +44,12 @@ class Mp3RegressionTests(unittest.TestCase):
         with TemporaryDirectory() as directory:
             path = Path(directory) / "audio.mp3"
             path.write_bytes(data)
-            return list(mp3.read_mp3(path, content=content, verify=content))
+            parsed = []
+            for item in mp3.read_mp3(path, content=content):
+                if content or not isinstance(item, mp3.MpegAudioFrame):
+                    item.validate()
+                parsed.append(item)
+            return parsed
 
     def test_copy_preserves_source_for_same_file_and_hardlink(self):
         with TemporaryDirectory() as directory:
@@ -75,10 +80,11 @@ class Mp3RegressionTests(unittest.TestCase):
             b"ID3\x04\x00\x00\x00\x00\x00\x80",
         ):
             with self.subTest(tag=tag), self.assertRaises(ParseError):
-                mp3.read_id3v2(BytesIO(tag))
-        stream = BytesIO(b"ID3\x03\x00\x00\x00\x00\x00\x00" + self.frame())
+                mp3.read_id3v2(BytesIO(tag)).validate()
+        tag = self.id3v24()
+        stream = BytesIO(tag + self.frame())
         mp3.read_id3v2(stream)
-        self.assertEqual(10, stream.tell())
+        self.assertEqual(len(tag), stream.tell())
 
     def test_free_format_padding_tags_and_truncation_for_all_layers(self):
         for layer in (mp3.Layer.LAYER_I, mp3.Layer.LAYER_II, mp3.Layer.LAYER_III):
@@ -92,51 +98,52 @@ class Mp3RegressionTests(unittest.TestCase):
                 with self.subTest(layer=layer, content=content):
                     parsed = self.parse(b"".join(frames) + self.id3v24(), content)
                     self.assertEqual(4, len(parsed))
-                    self.assertIsInstance(parsed[-1][1][1], mp3.Id3v2Header)
+                    self.assertIsInstance(parsed[-1].header, mp3.Id3v2Header)
                     if content:
-                        self.assertEqual([420, 420 + slot, 420], [len(raw) for raw, _ in parsed[:-1]])
+                        self.assertEqual([420, 420 + slot, 420], [len(item.raw()) for item in parsed[:-1]])
                     with self.assertRaises(mp3.InvalidFrame):
                         self.parse(b"".join(frames)[:-10], content)
                     stream = BytesIO(b"".join(frames))
                     for expected in frames:
-                        parsed_frame = mp3.read_frame(stream, content=content, verify=content)
+                        parsed_frame = mp3.read_frame(stream, content=content)
                         self.assertIsNotNone(parsed_frame)
                         if content:
-                            self.assertEqual(expected, parsed_frame[0])
-                    self.assertIsNone(mp3.read_frame(stream, content=content, verify=content))
+                            parsed_frame.validate_frame()
+                            self.assertEqual(expected, parsed_frame.raw())
+                    self.assertIsNone(mp3.read_frame(stream, content=content))
 
     def test_free_format_layer2_uses_specified_allocation_table(self):
         for frequency, sblimit in ((0, 30), (1, 27), (2, 30)):
             with self.subTest(frequency=frequency):
                 frames = self.parse(self.frame(size=420, layer=mp3.Layer.LAYER_II, bitrate=0, frequency=frequency) * 2)
                 self.assertEqual(2, len(frames))
-                self.assertEqual(sblimit, frames[0][1].sideinfo.sblimit)
+                self.assertEqual(sblimit, frames[0].sideinfo.sblimit)
 
     def test_id3v11_track_and_comment(self):
         for comment in (b"", b"a comment"):
             tag = b"TAG" + bytes(94) + comment.ljust(28, b"\0") + b"\0\x07\x00"
-            _, fields = mp3.read_id3v1(BytesIO(tag))
+            fields = mp3.read_id3v1(BytesIO(tag)).parse()
             self.assertIsInstance(fields, mp3.Id3v11Fields)
             self.assertEqual(7, fields.track)
             self.assertEqual(comment, fields.comment)
-        _, fields = mp3.read_id3v1(BytesIO(b"TAG" + bytes(125)))
+        fields = mp3.read_id3v1(BytesIO(b"TAG" + bytes(125))).parse()
         self.assertIsInstance(fields, mp3.Id3v1Fields)
 
     def test_lyrics3_versions_preserve_payload_and_next_tag(self):
         lyrics = b"complete lyrics longer than nine bytes"
         v1 = b"LYRICSBEGIN" + lyrics + b"LYRICSEND"
-        body = b"LYRICSBEGININD00003110LYR00005words"
+        body = b"LYRICSBEGININD00003100LYR00005words"
         v2 = body + ("%06d" % len(body)).encode("ascii") + b"LYRICS200"
-        for tag, expected in ((v1, lyrics.decode("ascii")), (v2, {"IND": "110", "LYR": "words"})):
+        for tag, expected in ((v1, lyrics.decode("ascii")), (v2, {"IND": "100", "LYR": "words"})):
             with self.subTest(tag=tag):
                 parsed = self.parse(self.frame() + tag + b"TAG" + bytes(125))
                 self.assertEqual(3, len(parsed))
-                self.assertEqual(expected, parsed[1][1][1])
-                self.assertIsInstance(parsed[-1][1][1], mp3.Id3v1Fields)
+                self.assertEqual(expected, parsed[1].parse())
+                self.assertIsInstance(parsed[-1].parse(), mp3.Id3v1Fields)
         with self.assertRaises(mp3.InvalidFrame):
             mp3.read_lyrics3v1(BytesIO(v1[:-1]))
         with self.assertRaises(mp3.InvalidFrame):
-            mp3.read_lyrics3v2(BytesIO(v2.replace(b"LYR00005", b"LYR99999")))
+            mp3.read_lyrics3v2(BytesIO(v2.replace(b"LYR00005", b"LYR99999"))).validate()
 
     def test_ape_optional_header_and_following_id3v1(self):
         for item in (b"", struct.pack("<LL", 1, 0) + b"Title\0x"):
@@ -161,7 +168,7 @@ class Mp3RegressionTests(unittest.TestCase):
                     self.assertEqual(b"TAG", stream.read(3))
                     parsed = self.parse(self.frame() + tag + b"TAG" + bytes(125))
                     self.assertEqual(3, len(parsed))
-                    self.assertIsInstance(parsed[1][1][1], mp3.APEv2Header)
+                    self.assertIsInstance(parsed[1].header, mp3.APEv2Header)
 
     def test_ape_item_size_cannot_be_mistaken_for_an_audio_header(self):
         for prefix in (bytes.fromhex("fffb0000"), bytes.fromhex("fffb1000")):
@@ -171,7 +178,7 @@ class Mp3RegressionTests(unittest.TestCase):
             for content in (False, True):
                 parsed = self.parse(self.frame() + item + footer, content)
                 self.assertEqual(2, len(parsed))
-                self.assertIsInstance(parsed[-1][1][1], mp3.APEv2Header)
+                self.assertIsInstance(parsed[-1].header, mp3.APEv2Header)
 
     def test_appended_id3v24_requires_footer_flag(self):
         tag = self.id3v24()
